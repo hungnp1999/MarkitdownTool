@@ -232,6 +232,47 @@ class ApiTests(TempTree):
         status, body = self.request("POST", "/v1/convert", {"files": [{"name": "x.exe", "content_base64": ""}]})
         self.assertEqual((status, body["error"]["code"]), (400, "unsupported_format"))
 
+    def raw_request(self, path, data=b"{}", headers=None):
+        request = urllib.request.Request(self.base + path, data=data, method="POST", headers=headers or {})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            return error.code, json.loads(error.read())
+
+    def test_cross_site_simple_posts_are_rejected(self):
+        for content_type in ("text/plain", "application/x-www-form-urlencoded", None):
+            with self.subTest(content_type=content_type):
+                headers = {"Authorization": "Bearer secret"}
+                if content_type:
+                    headers["Content-Type"] = content_type
+                status, body = self.raw_request("/v1/classify", headers=headers)
+                self.assertEqual((status, body["error"]["code"]), (415, "unsupported_media_type"))
+
+    def test_json_with_charset_is_accepted(self):
+        status, _ = self.raw_request(
+            "/v1/classify",
+            json.dumps({"paths": [str(self.root / "nope.pdf")]}).encode(),
+            {"Authorization": "Bearer secret", "Content-Type": "application/json; charset=utf-8"},
+        )
+        self.assertEqual(status, 404)
+
+    def test_rebound_host_names_are_rejected(self):
+        for host in ("evil.example", "evil.example:8765", "127.0.0.1.evil.example"):
+            with self.subTest(host=host):
+                request = urllib.request.Request(self.base + "/v1/health", headers={"Host": host})
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    urllib.request.urlopen(request, timeout=10)
+                self.assertEqual(raised.exception.code, 403)
+                self.assertEqual(json.loads(raised.exception.read())["error"]["code"], "invalid_host")
+
+    def test_loopback_host_names_are_accepted(self):
+        for host in ("localhost:8765", "127.0.0.1", "[::1]:8765"):
+            with self.subTest(host=host):
+                request = urllib.request.Request(self.base + "/v1/health", headers={"Host": host})
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    self.assertEqual(response.status, 200)
+
     def test_unknown_route_and_wrong_method(self):
         self.assertEqual(self.request("GET", "/v1/nope")[0], 404)
         self.assertEqual(self.request("GET", "/v1/convert")[0], 405)
@@ -239,8 +280,11 @@ class ApiTests(TempTree):
 
 class ApiBindingTests(unittest.TestCase):
     def test_non_loopback_requires_token(self):
-        from api_server import create_server, is_loopback
+        from api_server import create_server, is_loopback, request_host
 
+        self.assertEqual(request_host("[::1]:8765"), "::1")
+        self.assertEqual(request_host("localhost:8765"), "localhost")
+        self.assertEqual(request_host("::1"), "::1")
         self.assertTrue(is_loopback("127.0.0.1"))
         self.assertTrue(is_loopback("::1"))
         self.assertFalse(is_loopback("0.0.0.0"))
