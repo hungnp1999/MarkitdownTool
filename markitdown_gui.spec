@@ -56,3 +56,49 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+
+# Console executable for the CLI, HTTP API, and MCP (stdio) integrations.
+cli_datas = list(datas)
+cli_binaries = list(binaries)
+cli_hiddenimports = list(hiddenimports)
+for package in ('mcp', 'mcp_types'):
+    # mcp.cli is the SDK's own developer CLI and needs typer, which is not installed.
+    tmp_ret = collect_all(package, filter_submodules=lambda name: not name.startswith('mcp.cli'))
+    cli_datas += tmp_ret[0]; cli_binaries += tmp_ret[1]; cli_hiddenimports += tmp_ret[2]
+
+cli_a = Analysis(
+    ['markitdown_cli.py'],
+    pathex=[],
+    binaries=cli_binaries,
+    datas=cli_datas,
+    hiddenimports=cli_hiddenimports + ['api_server', 'mcp_server', 'integration_service'],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=['fitz', 'pymupdf', 'tkinter'],
+    noarchive=False,
+    optimize=0,
+)
+cli_pyz = PYZ(cli_a.pure)
+
+cli_exe = EXE(
+    cli_pyz,
+    cli_a.scripts,
+    cli_a.binaries,
+    cli_a.datas,
+    [],
+    name='markitdowntool',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)

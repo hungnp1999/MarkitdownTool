@@ -133,6 +133,25 @@ def classify_files(file_paths: Iterable[str | Path]) -> tuple[FileClassification
     return tuple(classify_file(path) for path in file_paths)
 
 
+def collect_supported_files(folder: str | Path, recursive: bool = False) -> list[Path]:
+    root = Path(folder)
+    if not root.is_dir():
+        raise NotADirectoryError(f"Not a folder: {root}")
+    candidates = root.rglob("*") if recursive else root.iterdir()
+    return sorted(
+        (
+            path
+            for path in candidates
+            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS and not path.name.startswith("~$")
+        ),
+        key=lambda path: str(path).casefold(),
+    )
+
+
+def has_subfolders(folder: str | Path) -> bool:
+    return any(path.is_dir() for path in Path(folder).iterdir())
+
+
 def output_path_for(source: Path, output_dir: Path, extension: str) -> Path:
     identity = os.path.normcase(str(source.resolve()))
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:10]
