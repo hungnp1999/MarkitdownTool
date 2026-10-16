@@ -70,10 +70,6 @@ def _reason(reason: str) -> tuple[str, str]:
     return _REASON_CODES.get(reason, ("error", reason))
 
 
-def _with_separator(root: str) -> str:
-    return root if root.endswith(os.sep) else root + os.sep
-
-
 def _local_drive_roots() -> list[str]:
     if os.name != "nt":
         return [os.sep]
@@ -84,20 +80,26 @@ def _local_drive_roots() -> list[str]:
 
 
 def allowed_roots(environment: dict[str, str] | None = None) -> list[str]:
-    r"""Folders integrations may read from and write to.
+    r"""Folders integrations may read from and write to, as canonical paths without a trailing separator.
 
     Defaults to every local drive, which excludes UNC shares and mapped network drives.
     MARKITDOWNTOOL_ALLOWED_ROOTS (separated by os.pathsep) replaces the default; an
     administrator can list a trusted share such as \\nas\docs there explicitly.
+    Roots are resolved with realpath so they use the same letter case as resolved inputs.
     """
     configured = (os.environ if environment is None else environment).get(ALLOWED_ROOTS_ENV, "")
     roots = [value.strip() for value in configured.split(os.pathsep) if value.strip()] or _local_drive_roots()
-    return [_with_separator(os.path.normcase(os.path.normpath(os.path.abspath(root)))) for root in roots]
+    return [os.path.realpath(os.path.normpath(os.path.abspath(root))).rstrip(os.sep) for root in roots]
 
 
 def _within(path: str, roots: Sequence[str]) -> bool:
+    """Case-insensitive, string-only containment check; never touches the file system."""
     candidate = os.path.normcase(path)
-    return any(candidate == root.rstrip(os.sep) or candidate.startswith(root) for root in roots)
+    for root in roots:
+        base = os.path.normcase(root)
+        if candidate.startswith(base) and candidate[len(base):len(base) + 1] in ("", os.sep):
+            return True
+    return False
 
 
 def ensure_allowed_path(value: str | Path, roots: Sequence[str]) -> Path:
@@ -105,15 +107,18 @@ def ensure_allowed_path(value: str | Path, roots: Sequence[str]) -> Path:
 
     The first check runs on the string only, so a UNC path such as \\host\share is
     refused before Windows touches the network (which would send the user's NTLM hash).
-    The second check runs after symlinks and junctions are resolved.
+    The second check runs after symlinks and junctions are resolved. It is written as
+    normpath/realpath followed by an inline startswith guard on the same variable, the
+    form static analysis (CodeQL py/path-injection) recognises as a path sanitiser.
     """
     normalized = os.path.normpath(os.path.abspath(os.path.expanduser(str(value))))
     if not _within(normalized, roots):
         raise ServiceError("path_not_allowed", "Path is outside the folders integrations may use.", {"path": str(value)})
     resolved = os.path.realpath(normalized)
-    if not _within(resolved, roots):
-        raise ServiceError("path_not_allowed", "Path resolves outside the folders integrations may use.", {"path": str(value)})
-    return Path(resolved)
+    for root in roots:
+        if resolved.startswith(root) and resolved[len(root):len(root) + 1] in ("", os.sep):
+            return Path(resolved)
+    raise ServiceError("path_not_allowed", "Path resolves outside the folders integrations may use.", {"path": str(value)})
 
 
 def expand_inputs(

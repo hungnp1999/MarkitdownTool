@@ -240,7 +240,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         with tempfile.TemporaryDirectory(prefix="markitdowntool_upload_") as folder:
             uploads = _write_uploads(body["files"], Path(folder))
             # Uploaded copies live in a private temp folder that may sit outside the configured roots.
-            upload_root = os.path.normcase(os.path.realpath(folder)) + os.sep
+            upload_root = os.path.realpath(folder)
             options["roots"] = [*self.roots, upload_root]
             result = convert([*paths, *uploads], self.app_paths, **options)
         upload_sources = {os.path.realpath(path): path.name for path in uploads}
