@@ -2,6 +2,7 @@ import base64
 import contextlib
 import io
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -77,6 +78,87 @@ class ExpandInputsTests(TempTree):
         with self.assertRaises(ServiceError) as raised:
             expand_inputs([images], recursive=True)
         self.assertEqual(raised.exception.code, "no_input_files")
+
+
+class PathPolicyTests(TempTree):
+    def roots(self, *folders):
+        return integration_service.allowed_roots({integration_service.ALLOWED_ROOTS_ENV: os.pathsep.join(map(str, folders))})
+
+    def test_network_and_device_paths_are_refused_before_any_file_access(self):
+        roots = integration_service.allowed_roots()
+        for value in (r"\\evil\share\a.pdf", r"\\evil@SSL\DavWWWRoot\a.pdf", "//evil/share/a.pdf", r"\\?\UNC\evil\share", r"\\.\C:\a.pdf"):
+            with self.subTest(value=value), patch("os.path.realpath") as realpath, patch.object(Path, "is_dir") as is_dir:
+                with self.assertRaises(ServiceError) as raised:
+                    expand_inputs([value], roots=roots)
+                self.assertEqual(raised.exception.code, "path_not_allowed")
+                realpath.assert_not_called()
+                is_dir.assert_not_called()
+
+    def test_configured_roots_narrow_access_without_prefix_confusion(self):
+        roots = self.roots(self.root / "sub")
+        self.assertEqual([path.name for path in expand_inputs([self.root / "sub"], roots=roots)], ["c.xlsx"])
+        for value in (self.root / "a.pdf", str(self.root / "sub") + "2", self.root / "sub" / ".." / "a.pdf"):
+            with self.subTest(value=value), self.assertRaises(ServiceError) as raised:
+                expand_inputs([value], roots=roots)
+            self.assertEqual(raised.exception.code, "path_not_allowed")
+
+    @unittest.skipUnless(os.name == "nt", "junctions are Windows-only")
+    def test_junction_that_leaves_the_allowed_root_is_refused(self):
+        import _winapi
+
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "secret.docx").write_bytes(b"x")
+        allowed = self.root / "allowed"
+        allowed.mkdir()
+        _winapi.CreateJunction(str(outside), str(allowed / "link"))
+        roots = self.roots(allowed)
+        for value in (allowed / "link", allowed / "link" / "secret.docx"):
+            with self.subTest(value=value), self.assertRaises(ServiceError) as raised:
+                expand_inputs([value], roots=roots)
+            self.assertEqual(raised.exception.code, "path_not_allowed")
+        with self.assertRaises(ServiceError):
+            expand_inputs([allowed], recursive=True, roots=roots)
+
+    def test_output_dir_must_be_inside_allowed_roots(self):
+        roots = self.roots(self.root / "sub")
+        for output_dir in (str(self.root / "elsewhere"), r"\\evil\share\out"):
+            with self.subTest(output_dir=output_dir), self.assertRaises(ServiceError) as raised:
+                convert([self.root / "sub" / "c.xlsx"], self.paths, mode="markdown", output_dir=output_dir, roots=roots)
+            self.assertEqual(raised.exception.code, "path_not_allowed")
+
+    def test_default_roots_are_local_drives_only(self):
+        roots = integration_service.allowed_roots({})
+        self.assertTrue(roots)
+        self.assertFalse(any(root.startswith(("\\\\", "//")) for root in roots))
+
+
+class ApiTokenTests(TempTree):
+    def test_token_is_generated_once_and_reused(self):
+        from app_runtime import load_or_create_api_token
+
+        token_file = self.root / "settings" / "api_token"
+        first = load_or_create_api_token(token_file)
+        self.assertGreaterEqual(len(first), 32)
+        self.assertEqual(load_or_create_api_token(token_file), first)
+
+    def test_server_without_explicit_token_still_requires_one(self):
+        from api_server import create_server
+
+        with patch.dict("os.environ", {}, clear=True), patch("api_server.load_or_create_api_token", return_value="generated"):
+            server = create_server(self.paths, "127.0.0.1", 0)
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(base + "/v1/info", timeout=10)
+            self.assertEqual(raised.exception.code, 401)
+            request = urllib.request.Request(base + "/v1/info", headers={"Authorization": "Bearer generated"})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                self.assertEqual(response.status, 200)
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 class ConvertTests(TempTree):
@@ -272,6 +354,10 @@ class ApiTests(TempTree):
                 request = urllib.request.Request(self.base + "/v1/health", headers={"Host": host})
                 with urllib.request.urlopen(request, timeout=10) as response:
                     self.assertEqual(response.status, 200)
+
+    def test_network_paths_are_forbidden(self):
+        status, body = self.request("POST", "/v1/classify", {"paths": ["\\\\evil\\share\\a.pdf"]})
+        self.assertEqual((status, body["error"]["code"]), (403, "path_not_allowed"))
 
     def test_unknown_route_and_wrong_method(self):
         self.assertEqual(self.request("GET", "/v1/nope")[0], 404)

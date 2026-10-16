@@ -1,4 +1,4 @@
-﻿# MarkitdownTool 2.2.0
+﻿# MarkitdownTool 2.2.1
 
 A Windows desktop tool for processing PDF, DOCX, PPTX, and XLSX files. Scanned PDFs can be OCR-processed with Tesseract and OCRmyPDF.
 
@@ -53,7 +53,7 @@ Use **Add files** to pick individual documents, or **Add folder** to add every s
 
 ## Integrations: CLI, HTTP API, and MCP
 
-MarkitdownTool can be connected to other components of the Human-centric Automation Ecosystem through three interfaces. All of them run locally, share the OCR language settings and output folders configured in the app, and return the same JSON result shape. **Settings → Connection** shows ready-to-copy commands for the current installation.
+MarkitdownTool can be connected to other components of the Human-centric Automation Ecosystem through three interfaces. All of them run locally, only read and write files on local drives (see [Allowed folders](#allowed-folders)), share the OCR language settings and output folders configured in the app, and return the same JSON result shape. **Settings → Connection** shows ready-to-copy commands for the current installation.
 
 The installer places the console executable `markitdowntool.exe` next to `markitdown_gui.exe` in `%LOCALAPPDATA%\Programs\MarkitdownTool`. From source, use `python markitdown_cli.py` instead of `markitdowntool`.
 
@@ -75,7 +75,6 @@ markitdowntool info --json
 ### HTTP API
 
 ```powershell
-$env:MARKITDOWNTOOL_API_TOKEN = "change-me"
 markitdowntool api --port 8765
 ```
 
@@ -89,7 +88,7 @@ markitdowntool api --port 8765
 
 `/v1/convert` also accepts uploads as `"files": [{"name": "report.docx", "content_base64": "..."}]` for callers that do not share the file system. Paths must be absolute paths on the machine running the server. Errors use `{"error": {"code", "message", "details"}}` with HTTP 400/401/404/405/413/503.
 
-The server binds to `127.0.0.1` by default. When a token is set (`--token` or `MARKITDOWNTOOL_API_TOKEN`), every endpoint except `/v1/health` requires `Authorization: Bearer <token>`. Binding to a non-loopback address is refused without a token, because API callers can ask the server to read local files. On loopback, requests must use a loopback `Host` header (`localhost`, `127.0.0.1`, or `[::1]`), and POST bodies must be sent as `Content-Type: application/json`; this keeps web pages in a browser from calling the API through DNS rebinding or cross-site form posts. Conversions run one batch at a time.
+The server binds to `127.0.0.1` by default. Every endpoint except `/v1/health` requires `Authorization: Bearer <token>`, because other accounts and processes on the same machine can also reach loopback. Set the token with `--token` or `MARKITDOWNTOOL_API_TOKEN`; otherwise MarkitdownTool generates one on first start and stores it in `%LOCALAPPDATA%\MarkitdownTool\api_token`, which only your Windows account can read. Binding to a non-loopback address requires an explicit token. On loopback, requests must use a loopback `Host` header (`localhost`, `127.0.0.1`, or `[::1]`), and POST bodies must be sent as `Content-Type: application/json`; this keeps web pages in a browser from calling the API through DNS rebinding or cross-site form posts. Conversions run one batch at a time.
 
 ### MCP
 
@@ -107,6 +106,18 @@ The server binds to `127.0.0.1` by default. When a token is set (`--token` or `M
 ```
 
 `convert_documents` returns the Markdown text by default (`include_content: true`), so agents can use the result directly.
+
+### Allowed folders
+
+The CLI, API, and MCP server only accept input paths and `output_dir` values on local drives. UNC paths (`\\server\share`), WebDAV paths, mapped network drives, device paths (`\\?\`, `\\.\`), and junctions or symlinks that lead outside the allowed folders are refused with `path_not_allowed` (HTTP 403) before Windows touches the network. This keeps a malicious document or prompt from making an agent send your Windows credentials (NTLM hash) to a remote server.
+
+To narrow access further, for example when an AI agent uses the MCP server, list the allowed folders in `MARKITDOWNTOOL_ALLOWED_ROOTS`, separated by `;`:
+
+```powershell
+$env:MARKITDOWNTOOL_ALLOWED_ROOTS = "D:\Docs;D:\Results"
+```
+
+A trusted file share can be allowed by listing it there explicitly.
 
 ## OCR languages
 

@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from app_paths import copy_data_preserving_existing, find_application_resource
-from app_runtime import APP_DIR, APP_VERSION, GITHUB_REPOSITORY, IS_FROZEN, cli_command, prepare_runtime, read_config, save_config
+from app_runtime import API_TOKEN_FILE, APP_DIR, APP_VERSION, GITHUB_REPOSITORY, IS_FROZEN, cli_command, prepare_runtime, read_config, save_config
 from document_core import (
     BatchResult,
     FileClassification,
@@ -296,7 +296,8 @@ class MarkitdownApp:
             ("api_title", "api_hint", f"{cli} api --port 8765"),
             ("mcp_title", "mcp_hint", mcp_config),
         ):
-            self._connection_snippet(connection, self.t(title_key), self.t(hint_key), snippet)
+            self._connection_snippet(connection, self.t(title_key), self.t(hint_key, token_file=API_TOKEN_FILE), snippet)
+        ttk.Label(connection, text=self.t("integration_roots_hint"), wraplength=680).pack(anchor="w", pady=(10, 0))
 
         ttk.Label(about, text=self.t("about_version", version=APP_VERSION), style="Section.TLabel").pack(anchor="w", pady=(0, 8))
         ttk.Label(about, text=self.t("about_author")).pack(anchor="w", pady=(0, 8))
