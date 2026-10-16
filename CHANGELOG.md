@@ -2,6 +2,12 @@
 
 Notable changes to MarkitdownTool are listed here by release.
 
+## [Unreleased]
+
+### Changed
+
+- Rewrote the final allowed-folder check in `ensure_allowed_path` as an inline `realpath` + `startswith` guard so CodeQL recognises it as a path sanitiser. Behaviour is unchanged; allowed roots are now stored in canonical letter case.
+
 ## [2.2.1] - 2026-10-16
 
 ### Security
