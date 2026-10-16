@@ -9,7 +9,7 @@ Notable changes to MarkitdownTool are listed here by release.
 - Added **Add folder** next to **Add files** to add every supported document in a folder, optionally including subfolders.
 - Added integration interfaces for the Human-centric Automation Ecosystem, sharing one JSON result format:
   - CLI (`markitdowntool convert | classify | languages | info`) with `--json` output and documented exit codes.
-  - Local HTTP API (`markitdowntool api`) with bearer-token authentication, base64 uploads, and loopback-only binding unless a token is set.
+  - Local HTTP API (`markitdowntool api`) with bearer-token authentication, base64 uploads, and loopback-only binding unless a token is set. On loopback it rejects non-loopback `Host` headers and non-JSON POST bodies so web pages cannot reach it through DNS rebinding or cross-site form posts.
   - MCP server over stdio (`markitdowntool mcp`) with `convert_documents`, `classify_documents`, `list_ocr_languages`, and `get_tool_info` tools.
 - Added the console executable `markitdowntool.exe` to the build and installer.
 - Settings → Connection now shows ready-to-copy CLI, API, and MCP configuration for the current installation.

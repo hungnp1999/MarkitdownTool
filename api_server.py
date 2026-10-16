@@ -9,7 +9,9 @@ Endpoints (all JSON):
                          "output_dir", "recursive", "include_content"}
 
 The server binds to 127.0.0.1 by default. Binding to any other address requires a
-bearer token, because callers can ask the server to read local files.
+bearer token, because callers can ask the server to read local files. On loopback the
+server also rejects non-loopback Host headers (DNS rebinding) and POST bodies that are
+not application/json (cross-site form or text/plain posts that skip CORS preflight).
 """
 
 import base64
@@ -50,6 +52,14 @@ def is_loopback(host: str) -> bool:
         return False
 
 
+def request_host(header: str) -> str:
+    """Host name from a Host header, without the port; IPv6 brackets are removed."""
+    header = header.strip()
+    if header.startswith("["):
+        return header[1:].split("]", 1)[0]
+    return header.rsplit(":", 1)[0] if header.count(":") == 1 else header
+
+
 def _bool(body: dict, key: str) -> bool:
     value = body.get(key, False)
     if not isinstance(value, bool):
@@ -87,7 +97,9 @@ def _write_uploads(files: object, folder: Path) -> list[Path]:
         except (binascii.Error, ValueError) as error:
             raise ServiceError("invalid_request", f"files[{index}].content_base64 is not valid base64.") from error
         # One subfolder per upload keeps identical names from overwriting each other.
-        target = folder / str(index) / name
+        target = (folder / str(index) / name).resolve()
+        if target.parent.parent != folder.resolve():
+            raise ServiceError("invalid_request", f"files[{index}].name is not a plain file name.")
         target.parent.mkdir()
         target.write_bytes(content)
         written.append(target)
@@ -98,6 +110,7 @@ class ApiHandler(BaseHTTPRequestHandler):
     server_version = f"MarkitdownTool/{APP_VERSION}"
     app_paths: AppPaths
     token: str | None = None
+    loopback_only = True
 
     def log_message(self, format: str, *args) -> None:
         logging.getLogger(__name__).info("%s %s", self.address_string(), format % args)
@@ -137,13 +150,37 @@ class ApiHandler(BaseHTTPRequestHandler):
             raise ServiceError("invalid_request", "Request body must be a JSON object.")
         return body
 
+    def _reject(self, status: HTTPStatus, code: str, message: str) -> None:
+        """Answer an error before the body was read; drain it so the client is not reset mid-upload."""
+        try:
+            remaining = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            remaining = -1
+        if 0 <= remaining <= MAX_BODY_BYTES:
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 1024 * 1024))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        else:
+            self.close_connection = True
+        self._send_error(status, code, message)
+
     def _dispatch(self, method: str) -> None:
         route = self.path.split("?", 1)[0].rstrip("/")
+        if self.loopback_only and not is_loopback(request_host(self.headers.get("Host", ""))):
+            # Blocks DNS rebinding: a web page served from another name must not reach the local API.
+            self._reject(HTTPStatus.FORBIDDEN, "invalid_host", "The Host header must be a loopback address.")
+            return
+        if method == "POST" and self.headers.get_content_type() != "application/json":
+            # Browsers send cross-site text/plain or form posts without a CORS preflight; JSON requires one.
+            self._reject(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type", "Content-Type must be application/json.")
+            return
         if method == "GET" and route == "/v1/health":
             self._send(HTTPStatus.OK, {"status": "ok", "version": APP_VERSION})
             return
         if not self._authorized():
-            self._send_error(HTTPStatus.UNAUTHORIZED, "unauthorized", "Missing or invalid bearer token.")
+            self._reject(HTTPStatus.UNAUTHORIZED, "unauthorized", "Missing or invalid bearer token.")
             return
 
         routes = {
@@ -156,9 +193,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         if handler is None:
             known = {path for _method, path in routes} | {"/v1/health"}
             if route in known:
-                self._send_error(HTTPStatus.METHOD_NOT_ALLOWED, "method_not_allowed", f"{method} is not allowed on {route}.")
+                self._reject(HTTPStatus.METHOD_NOT_ALLOWED, "method_not_allowed", f"{method} is not allowed on {route}.")
             else:
-                self._send_error(HTTPStatus.NOT_FOUND, "not_found", f"Unknown endpoint {route or '/'}.")
+                self._reject(HTTPStatus.NOT_FOUND, "not_found", f"Unknown endpoint {route or '/'}.")
             return
 
         try:
@@ -212,7 +249,7 @@ def create_server(paths: AppPaths, host: str = "127.0.0.1", port: int = 8765, to
     token = token or os.environ.get(TOKEN_ENV) or None
     if not is_loopback(host) and not token:
         raise ServiceError("token_required", f"Set --token or {TOKEN_ENV} before binding to a non-loopback address.")
-    handler = type("ConfiguredApiHandler", (ApiHandler,), {"app_paths": paths, "token": token})
+    handler = type("ConfiguredApiHandler", (ApiHandler,), {"app_paths": paths, "token": token, "loopback_only": is_loopback(host)})
     return ThreadingHTTPServer((host, port), handler)
 
 

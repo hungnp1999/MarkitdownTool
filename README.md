@@ -89,7 +89,7 @@ markitdowntool api --port 8765
 
 `/v1/convert` also accepts uploads as `"files": [{"name": "report.docx", "content_base64": "..."}]` for callers that do not share the file system. Paths must be absolute paths on the machine running the server. Errors use `{"error": {"code", "message", "details"}}` with HTTP 400/401/404/405/413/503.
 
-The server binds to `127.0.0.1` by default. When a token is set (`--token` or `MARKITDOWNTOOL_API_TOKEN`), every endpoint except `/v1/health` requires `Authorization: Bearer <token>`. Binding to a non-loopback address is refused without a token, because API callers can ask the server to read local files. Conversions run one batch at a time.
+The server binds to `127.0.0.1` by default. When a token is set (`--token` or `MARKITDOWNTOOL_API_TOKEN`), every endpoint except `/v1/health` requires `Authorization: Bearer <token>`. Binding to a non-loopback address is refused without a token, because API callers can ask the server to read local files. On loopback, requests must use a loopback `Host` header (`localhost`, `127.0.0.1`, or `[::1]`), and POST bodies must be sent as `Content-Type: application/json`; this keeps web pages in a browser from calling the API through DNS rebinding or cross-site form posts. Conversions run one batch at a time.
 
 ### MCP
 
