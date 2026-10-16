@@ -262,7 +262,8 @@ def convert(
         _check_ocr_ready(languages, paths)
 
     if output_dir:
-        if not Path(str(output_dir)).expanduser().is_absolute():
+        # String-only check: caller data must not reach pathlib before ensure_allowed_path.
+        if not os.path.isabs(os.path.expanduser(str(output_dir))):
             raise ServiceError("invalid_output_dir", "output_dir must be an absolute path.")
         root = ensure_allowed_path(output_dir, roots)
         markdown_dir, ocr_pdf_dir = root / "markdown", root / "ocrpdf"

@@ -24,11 +24,12 @@ import ipaddress
 import json
 import logging
 import os
+import posixpath
 import sys
 import tempfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path, PurePath
+from pathlib import Path
 
 from app_paths import AppPaths
 from app_runtime import API_TOKEN_FILE, APP_VERSION, load_or_create_api_token
@@ -80,7 +81,7 @@ def _string_list(body: dict, key: str) -> list[str]:
 
 def _absolute_paths(body: dict) -> list[str]:
     paths = _string_list(body, "paths")
-    relative = [path for path in paths if not Path(path).is_absolute()]
+    relative = [path for path in paths if not os.path.isabs(path)]
     if relative:
         raise ServiceError("invalid_request", "'paths' must be absolute paths on the server.", {"paths": relative})
     return paths
@@ -93,8 +94,8 @@ def _write_uploads(files: object, folder: Path) -> list[Path]:
     for index, item in enumerate(files):
         if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not isinstance(item.get("content_base64"), str):
             raise ServiceError("invalid_request", f"files[{index}] needs string 'name' and 'content_base64'.")
-        name = PurePath(item["name"].replace("\\", "/")).name
-        if not name or Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS:
+        name = posixpath.basename(item["name"].replace("\\", "/"))
+        if not name or os.path.splitext(name)[1].lower() not in SUPPORTED_EXTENSIONS:
             raise ServiceError("unsupported_format", f"files[{index}] must be one of: {', '.join(sorted(SUPPORTED_EXTENSIONS))}.")
         try:
             content = base64.b64decode(item["content_base64"], validate=True)
