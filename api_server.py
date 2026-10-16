@@ -97,9 +97,11 @@ def _write_uploads(files: object, folder: Path) -> list[Path]:
         except (binascii.Error, ValueError) as error:
             raise ServiceError("invalid_request", f"files[{index}].content_base64 is not valid base64.") from error
         # One subfolder per upload keeps identical names from overwriting each other.
-        target = (folder / str(index) / name).resolve()
-        if target.parent.parent != folder.resolve():
+        base = os.path.realpath(folder)
+        normalized = os.path.normpath(os.path.join(base, str(index), name))
+        if not normalized.startswith(base + os.sep):
             raise ServiceError("invalid_request", f"files[{index}].name is not a plain file name.")
+        target = Path(normalized)
         target.parent.mkdir()
         target.write_bytes(content)
         written.append(target)
