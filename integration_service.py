@@ -5,10 +5,12 @@ handles transport concerns (argument parsing, HTTP, MCP tool schemas).
 """
 
 import logging
+import os
+import string
 import threading
 from pathlib import Path
 from threading import Event
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Sequence
 
 from app_paths import AppPaths
 from app_runtime import APP_DIR, APP_VERSION, GITHUB_REPOSITORY, read_config
@@ -27,6 +29,8 @@ from document_core import (
 
 
 SCHEMA_VERSION = "1"
+ALLOWED_ROOTS_ENV = "MARKITDOWNTOOL_ALLOWED_ROOTS"
+_ALLOWED_DRIVE_TYPES = {2, 3, 5, 6}  # removable, fixed, CD-ROM, RAM disk; excludes network (4)
 
 _REASON_CODES = {
     "Định dạng này chưa được hỗ trợ.": ("unsupported_format", "This file format is not supported."),
@@ -66,22 +70,75 @@ def _reason(reason: str) -> tuple[str, str]:
     return _REASON_CODES.get(reason, ("error", reason))
 
 
-def expand_inputs(inputs: Iterable[str | Path], recursive: bool = False) -> list[Path]:
+def _with_separator(root: str) -> str:
+    return root if root.endswith(os.sep) else root + os.sep
+
+
+def _local_drive_roots() -> list[str]:
+    if os.name != "nt":
+        return [os.sep]
+    import ctypes
+
+    get_drive_type = ctypes.windll.kernel32.GetDriveTypeW
+    return [f"{letter}:\\" for letter in string.ascii_uppercase if get_drive_type(f"{letter}:\\") in _ALLOWED_DRIVE_TYPES]
+
+
+def allowed_roots(environment: dict[str, str] | None = None) -> list[str]:
+    r"""Folders integrations may read from and write to.
+
+    Defaults to every local drive, which excludes UNC shares and mapped network drives.
+    MARKITDOWNTOOL_ALLOWED_ROOTS (separated by os.pathsep) replaces the default; an
+    administrator can list a trusted share such as \\nas\docs there explicitly.
+    """
+    configured = (os.environ if environment is None else environment).get(ALLOWED_ROOTS_ENV, "")
+    roots = [value.strip() for value in configured.split(os.pathsep) if value.strip()] or _local_drive_roots()
+    return [_with_separator(os.path.normcase(os.path.normpath(os.path.abspath(root)))) for root in roots]
+
+
+def _within(path: str, roots: Sequence[str]) -> bool:
+    candidate = os.path.normcase(path)
+    return any(candidate == root.rstrip(os.sep) or candidate.startswith(root) for root in roots)
+
+
+def ensure_allowed_path(value: str | Path, roots: Sequence[str]) -> Path:
+    r"""Normalise a caller-supplied path and refuse anything outside the allowed roots.
+
+    The first check runs on the string only, so a UNC path such as \\host\share is
+    refused before Windows touches the network (which would send the user's NTLM hash).
+    The second check runs after symlinks and junctions are resolved.
+    """
+    normalized = os.path.normpath(os.path.abspath(os.path.expanduser(str(value))))
+    if not _within(normalized, roots):
+        raise ServiceError("path_not_allowed", "Path is outside the folders integrations may use.", {"path": str(value)})
+    resolved = os.path.realpath(normalized)
+    if not _within(resolved, roots):
+        raise ServiceError("path_not_allowed", "Path resolves outside the folders integrations may use.", {"path": str(value)})
+    return Path(resolved)
+
+
+def expand_inputs(
+    inputs: Iterable[str | Path],
+    recursive: bool = False,
+    roots: Sequence[str] | None = None,
+) -> list[Path]:
     """Turn files and folders into a de-duplicated list of files; folders yield supported files only."""
+    roots = allowed_roots() if roots is None else roots
     files: list[Path] = []
     seen: set[str] = set()
     missing: list[str] = []
     for value in inputs:
-        path = Path(value).expanduser()
+        path = ensure_allowed_path(value, roots)
         if path.is_dir():
             candidates = collect_supported_files(path, recursive=recursive)
         elif path.is_file():
             candidates = [path]
         else:
-            missing.append(str(path))
+            missing.append(str(value))
             continue
         for candidate in candidates:
-            key = str(candidate.resolve()).casefold()
+            # Re-check each file: a junction inside an allowed folder can point elsewhere.
+            candidate = ensure_allowed_path(candidate, roots)
+            key = str(candidate).casefold()
             if key not in seen:
                 seen.add(key)
                 files.append(candidate)
@@ -156,8 +213,8 @@ def list_languages(paths: AppPaths) -> dict:
     }
 
 
-def classify(inputs: Iterable[str | Path], recursive: bool = False) -> dict:
-    files = expand_inputs(inputs, recursive=recursive)
+def classify(inputs: Iterable[str | Path], recursive: bool = False, roots: Sequence[str] | None = None) -> dict:
+    files = expand_inputs(inputs, recursive=recursive, roots=roots)
     return {"files": [classification_to_dict(classify_file(path)) for path in files]}
 
 
@@ -185,14 +242,16 @@ def convert(
     include_content: bool = False,
     cancel_event: Event | None = None,
     progress_callback: Callable[[ProgressUpdate], None] | None = None,
+    roots: Sequence[str] | None = None,
 ) -> dict:
+    roots = allowed_roots() if roots is None else roots
     try:
         mode = ProcessingMode(mode)
     except ValueError as error:
         choices = ", ".join(item.value for item in ProcessingMode)
         raise ServiceError("invalid_mode", f"Unknown mode {mode!r}. Use one of: {choices}.") from error
 
-    files = expand_inputs(inputs, recursive=recursive)
+    files = expand_inputs(inputs, recursive=recursive, roots=roots)
     languages = list(languages) if languages else list(read_config().get("ocr_languages", []))
     classifications = tuple(classify_file(path) for path in files)
 
@@ -203,9 +262,9 @@ def convert(
         _check_ocr_ready(languages, paths)
 
     if output_dir:
-        root = Path(output_dir).expanduser()
-        if not root.is_absolute():
+        if not Path(str(output_dir)).expanduser().is_absolute():
             raise ServiceError("invalid_output_dir", "output_dir must be an absolute path.")
+        root = ensure_allowed_path(output_dir, roots)
         markdown_dir, ocr_pdf_dir = root / "markdown", root / "ocrpdf"
     else:
         markdown_dir, ocr_pdf_dir = paths.markdown_dir, paths.ocr_pdf_dir

@@ -2,6 +2,14 @@
 
 Notable changes to MarkitdownTool are listed here by release.
 
+## [2.2.1] - 2026-10-16
+
+### Security
+
+- CLI, HTTP API, and MCP integrations now only accept paths on local drives. UNC and WebDAV paths, mapped network drives, device paths, and junctions or symlinks that leave the allowed folders are refused before any file access. This prevents NTLM credential leaks through attacker-supplied paths, for example via prompt injection against an MCP agent. Resolves CodeQL `py/path-injection` alerts in `integration_service.py`.
+- Added `MARKITDOWNTOOL_ALLOWED_ROOTS` to restrict integrations to specific folders.
+- The HTTP API now always requires a bearer token. Without `--token` or `MARKITDOWNTOOL_API_TOKEN`, a random token is generated in the per-user settings folder, so other accounts on the same machine cannot use the API.
+
 ## [2.2.0] - 2026-10-16
 
 ### Added

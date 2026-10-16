@@ -9,18 +9,20 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from app_paths import AppPaths
 from app_runtime import APP_VERSION
-from integration_service import ServiceError, classify, convert, get_info, list_languages
+from integration_service import ServiceError, allowed_roots, classify, convert, get_info, list_languages
 
 
 INSTRUCTIONS = (
     "MarkitdownTool converts local PDF, DOCX, PPTX, and XLSX files to Markdown and can OCR scanned PDFs "
-    "with Tesseract. Paths must be absolute paths on the machine running this server. Use classify_documents "
+    "with Tesseract. Paths must be absolute paths on local drives of the machine running this server; network shares are refused. Use classify_documents "
     "to check files first, convert_documents to process them, and list_ocr_languages before choosing OCR languages."
 )
 
 
 def build_server(paths: AppPaths) -> MCPServer:
     server = MCPServer(name="MarkitdownTool", version=APP_VERSION, instructions=INSTRUCTIONS)
+    # Agents can be steered by prompt injection, so every path is confined to local allowed roots.
+    roots = allowed_roots()
 
     def call(function, *args, **kwargs) -> dict[str, Any]:
         # Third-party converters may print; stdout belongs to the MCP protocol stream.
@@ -58,12 +60,13 @@ def build_server(paths: AppPaths) -> MCPServer:
             output_dir=output_dir,
             recursive=recursive,
             include_content=include_content,
+            roots=roots,
         )
 
     @server.tool(structured_output=True)
     def classify_documents(paths_or_folders: list[str], recursive: bool = False) -> dict[str, Any]:
         """Report whether each file is supported, needs OCR, and which modes can process it."""
-        return call(classify, paths_or_folders, recursive=recursive)
+        return call(classify, paths_or_folders, recursive=recursive, roots=roots)
 
     @server.tool(structured_output=True)
     def list_ocr_languages() -> dict[str, Any]:

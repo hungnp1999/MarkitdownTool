@@ -8,8 +8,11 @@ Endpoints (all JSON):
   POST /v1/convert      {"paths": [...] | "files": [{"name", "content_base64"}], "mode", "languages",
                          "output_dir", "recursive", "include_content"}
 
-The server binds to 127.0.0.1 by default. Binding to any other address requires a
-bearer token, because callers can ask the server to read local files. On loopback the
+Every endpoint except /v1/health requires a bearer token. Without --token or
+MARKITDOWNTOOL_API_TOKEN the server generates one in the per-user settings folder
+(api_token), so other accounts on the machine cannot use the API. Binding to a
+non-loopback address requires an explicit token. Paths are limited to the roots from
+integration_service.allowed_roots (local drives by default, never UNC shares). On loopback the
 server also rejects non-loopback Host headers (DNS rebinding) and POST bodies that are
 not application/json (cross-site form or text/plain posts that skip CORS preflight).
 """
@@ -28,9 +31,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePath
 
 from app_paths import AppPaths
-from app_runtime import APP_VERSION
+from app_runtime import API_TOKEN_FILE, APP_VERSION, load_or_create_api_token
 from document_core import SUPPORTED_EXTENSIONS
-from integration_service import ServiceError, classify, convert, get_info, list_languages
+from integration_service import ServiceError, allowed_roots, classify, convert, get_info, list_languages
 
 
 TOKEN_ENV = "MARKITDOWNTOOL_API_TOKEN"
@@ -38,6 +41,7 @@ MAX_BODY_BYTES = 200 * 1024 * 1024
 
 _ERROR_STATUS = {
     "not_found": HTTPStatus.NOT_FOUND,
+    "path_not_allowed": HTTPStatus.FORBIDDEN,
     "tesseract_missing": HTTPStatus.SERVICE_UNAVAILABLE,
     "languages_unavailable": HTTPStatus.SERVICE_UNAVAILABLE,
 }
@@ -113,6 +117,7 @@ class ApiHandler(BaseHTTPRequestHandler):
     app_paths: AppPaths
     token: str | None = None
     loopback_only = True
+    roots: list[str] = []
 
     def log_message(self, format: str, *args) -> None:
         logging.getLogger(__name__).info("%s %s", self.address_string(), format % args)
@@ -211,7 +216,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def _classify(self) -> dict:
         body = self._read_json()
-        return classify(_absolute_paths(body), recursive=_bool(body, "recursive"))
+        return classify(_absolute_paths(body), recursive=_bool(body, "recursive"), roots=self.roots)
 
     def _convert(self) -> dict:
         body = self._read_json()
@@ -221,6 +226,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             "output_dir": body.get("output_dir") or None,
             "recursive": _bool(body, "recursive"),
             "include_content": _bool(body, "include_content"),
+            "roots": self.roots,
         }
         if options["output_dir"] is not None and not isinstance(options["output_dir"], str):
             raise ServiceError("invalid_request", "'output_dir' must be a string.")
@@ -232,8 +238,11 @@ class ApiHandler(BaseHTTPRequestHandler):
 
         with tempfile.TemporaryDirectory(prefix="markitdowntool_upload_") as folder:
             uploads = _write_uploads(body["files"], Path(folder))
+            # Uploaded copies live in a private temp folder that may sit outside the configured roots.
+            upload_root = os.path.normcase(os.path.realpath(folder)) + os.sep
+            options["roots"] = [*self.roots, upload_root]
             result = convert([*paths, *uploads], self.app_paths, **options)
-        upload_sources = {str(path): path.name for path in uploads}
+        upload_sources = {os.path.realpath(path): path.name for path in uploads}
         for item in result["files"]:
             if item["source"] in upload_sources:
                 item["source"] = upload_sources[item["source"]]
@@ -247,11 +256,29 @@ class ApiHandler(BaseHTTPRequestHandler):
         self._dispatch("POST")
 
 
-def create_server(paths: AppPaths, host: str = "127.0.0.1", port: int = 8765, token: str | None = None) -> ThreadingHTTPServer:
+def create_server(
+    paths: AppPaths,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    token: str | None = None,
+    roots: list[str] | None = None,
+) -> ThreadingHTTPServer:
     token = token or os.environ.get(TOKEN_ENV) or None
     if not is_loopback(host) and not token:
         raise ServiceError("token_required", f"Set --token or {TOKEN_ENV} before binding to a non-loopback address.")
-    handler = type("ConfiguredApiHandler", (ApiHandler,), {"app_paths": paths, "token": token, "loopback_only": is_loopback(host)})
+    # Every request needs a token: other accounts and processes on this machine can reach loopback too.
+    # The generated token lives in the per-user settings folder, which other Windows accounts cannot read.
+    token = token or load_or_create_api_token()
+    handler = type(
+        "ConfiguredApiHandler",
+        (ApiHandler,),
+        {
+            "app_paths": paths,
+            "token": token,
+            "loopback_only": is_loopback(host),
+            "roots": allowed_roots() if roots is None else roots,
+        },
+    )
     return ThreadingHTTPServer((host, port), handler)
 
 
@@ -263,6 +290,8 @@ def serve(paths: AppPaths, host: str = "127.0.0.1", port: int = 8765, token: str
         return 2
     bound_host, bound_port = server.server_address[:2]
     print(f"MarkitdownTool API {APP_VERSION} listening on http://{bound_host}:{bound_port}/v1 (Ctrl+C to stop)", file=sys.stderr)
+    if not (token or os.environ.get(TOKEN_ENV)):
+        print(f"Bearer token: read it from {API_TOKEN_FILE}", file=sys.stderr)
     logging.getLogger(__name__).info("API server started on %s:%s", bound_host, bound_port)
     try:
         server.serve_forever()

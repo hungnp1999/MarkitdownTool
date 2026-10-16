@@ -1,5 +1,6 @@
 import json
 import logging
+import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -7,12 +8,13 @@ from pathlib import Path
 from app_paths import AppPaths, build_app_paths, copy_data_preserving_existing, local_app_data, migrate_legacy_config
 
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 GITHUB_REPOSITORY = "hungnp1999/MarkitdownTool"
 IS_FROZEN = getattr(sys, "frozen", False)
 APP_DIR = Path(sys.executable).parent if IS_FROZEN else Path(__file__).parent
 SETTINGS_DIR = local_app_data() / "MarkitdownTool"
 CONFIG_FILE = SETTINGS_DIR / "config.json"
+API_TOKEN_FILE = SETTINGS_DIR / "api_token"
 DEFAULT_OCR_LANGUAGES = ["vie", "eng"]
 CLI_EXECUTABLE = "markitdowntool.exe"
 
@@ -23,6 +25,21 @@ def cli_command(*args: str) -> list[str]:
         return [str(APP_DIR / CLI_EXECUTABLE), *args]
     python = APP_DIR / ".venv" / "Scripts" / "python.exe"
     return [str(python if python.exists() else Path(sys.executable)), str(APP_DIR / "markitdown_cli.py"), *args]
+
+
+def load_or_create_api_token(token_file: Path | None = None) -> str:
+    """Return the local API token, creating a random one on first use."""
+    token_file = token_file or API_TOKEN_FILE
+    try:
+        token = token_file.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+    except OSError:
+        pass
+    token = secrets.token_urlsafe(32)
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(token, encoding="utf-8")
+    return token
 
 
 def read_config() -> dict:
