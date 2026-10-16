@@ -73,4 +73,4 @@ Users should review THIRD_PARTY_NOTICES.md for additional information.
 Nguyễn Phú Hùng
 
 GitHub:
-https://github.com/nguyenphuhung1999-commits/MarkitdownTool
+https://github.com/hungnp1999/MarkitdownTool

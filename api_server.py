@@ -1,0 +1,234 @@
+"""Local HTTP/JSON API for MarkitdownTool.
+
+Endpoints (all JSON):
+  GET  /v1/health       liveness check, no token needed
+  GET  /v1/info         version, OCR runtime, data folders
+  GET  /v1/languages    installed OCR languages
+  POST /v1/classify     {"paths": [...], "recursive": false}
+  POST /v1/convert      {"paths": [...] | "files": [{"name", "content_base64"}], "mode", "languages",
+                         "output_dir", "recursive", "include_content"}
+
+The server binds to 127.0.0.1 by default. Binding to any other address requires a
+bearer token, because callers can ask the server to read local files.
+"""
+
+import base64
+import binascii
+import hmac
+import ipaddress
+import json
+import logging
+import os
+import sys
+import tempfile
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path, PurePath
+
+from app_paths import AppPaths
+from app_runtime import APP_VERSION
+from document_core import SUPPORTED_EXTENSIONS
+from integration_service import ServiceError, classify, convert, get_info, list_languages
+
+
+TOKEN_ENV = "MARKITDOWNTOOL_API_TOKEN"
+MAX_BODY_BYTES = 200 * 1024 * 1024
+
+_ERROR_STATUS = {
+    "not_found": HTTPStatus.NOT_FOUND,
+    "tesseract_missing": HTTPStatus.SERVICE_UNAVAILABLE,
+    "languages_unavailable": HTTPStatus.SERVICE_UNAVAILABLE,
+}
+
+
+def is_loopback(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _bool(body: dict, key: str) -> bool:
+    value = body.get(key, False)
+    if not isinstance(value, bool):
+        raise ServiceError("invalid_request", f"'{key}' must be true or false.")
+    return value
+
+
+def _string_list(body: dict, key: str) -> list[str]:
+    value = body.get(key) or []
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+        raise ServiceError("invalid_request", f"'{key}' must be a list of non-empty strings.")
+    return value
+
+
+def _absolute_paths(body: dict) -> list[str]:
+    paths = _string_list(body, "paths")
+    relative = [path for path in paths if not Path(path).is_absolute()]
+    if relative:
+        raise ServiceError("invalid_request", "'paths' must be absolute paths on the server.", {"paths": relative})
+    return paths
+
+
+def _write_uploads(files: object, folder: Path) -> list[Path]:
+    if not isinstance(files, list):
+        raise ServiceError("invalid_request", "'files' must be a list of {name, content_base64} objects.")
+    written = []
+    for index, item in enumerate(files):
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not isinstance(item.get("content_base64"), str):
+            raise ServiceError("invalid_request", f"files[{index}] needs string 'name' and 'content_base64'.")
+        name = PurePath(item["name"].replace("\\", "/")).name
+        if not name or Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS:
+            raise ServiceError("unsupported_format", f"files[{index}] must be one of: {', '.join(sorted(SUPPORTED_EXTENSIONS))}.")
+        try:
+            content = base64.b64decode(item["content_base64"], validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise ServiceError("invalid_request", f"files[{index}].content_base64 is not valid base64.") from error
+        # One subfolder per upload keeps identical names from overwriting each other.
+        target = folder / str(index) / name
+        target.parent.mkdir()
+        target.write_bytes(content)
+        written.append(target)
+    return written
+
+
+class ApiHandler(BaseHTTPRequestHandler):
+    server_version = f"MarkitdownTool/{APP_VERSION}"
+    app_paths: AppPaths
+    token: str | None = None
+
+    def log_message(self, format: str, *args) -> None:
+        logging.getLogger(__name__).info("%s %s", self.address_string(), format % args)
+
+    def _send(self, status: HTTPStatus, data: dict) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_error(self, status: HTTPStatus, code: str, message: str, details: dict | None = None) -> None:
+        self._send(status, {"error": ServiceError(code, message, details).to_dict()})
+
+    def _authorized(self) -> bool:
+        if not self.token:
+            return True
+        header = self.headers.get("Authorization", "")
+        supplied = header[7:] if header.startswith("Bearer ") else ""
+        return hmac.compare_digest(supplied.encode("utf-8"), self.token.encode("utf-8"))
+
+    def _read_json(self) -> dict:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = -1
+        if length < 0:
+            raise ServiceError("invalid_request", "Invalid Content-Length header.")
+        if length > MAX_BODY_BYTES:
+            raise ServiceError("payload_too_large", f"Request body exceeds {MAX_BODY_BYTES // (1024 * 1024)} MB.")
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ServiceError("invalid_request", f"Request body is not valid JSON: {error}") from error
+        if not isinstance(body, dict):
+            raise ServiceError("invalid_request", "Request body must be a JSON object.")
+        return body
+
+    def _dispatch(self, method: str) -> None:
+        route = self.path.split("?", 1)[0].rstrip("/")
+        if method == "GET" and route == "/v1/health":
+            self._send(HTTPStatus.OK, {"status": "ok", "version": APP_VERSION})
+            return
+        if not self._authorized():
+            self._send_error(HTTPStatus.UNAUTHORIZED, "unauthorized", "Missing or invalid bearer token.")
+            return
+
+        routes = {
+            ("GET", "/v1/info"): lambda: get_info(self.app_paths),
+            ("GET", "/v1/languages"): lambda: list_languages(self.app_paths),
+            ("POST", "/v1/classify"): self._classify,
+            ("POST", "/v1/convert"): self._convert,
+        }
+        handler = routes.get((method, route))
+        if handler is None:
+            known = {path for _method, path in routes} | {"/v1/health"}
+            if route in known:
+                self._send_error(HTTPStatus.METHOD_NOT_ALLOWED, "method_not_allowed", f"{method} is not allowed on {route}.")
+            else:
+                self._send_error(HTTPStatus.NOT_FOUND, "not_found", f"Unknown endpoint {route or '/'}.")
+            return
+
+        try:
+            self._send(HTTPStatus.OK, handler())
+        except ServiceError as error:
+            status = HTTPStatus.REQUEST_ENTITY_TOO_LARGE if error.code == "payload_too_large" else _ERROR_STATUS.get(error.code, HTTPStatus.BAD_REQUEST)
+            self._send(status, {"error": error.to_dict()})
+        except Exception as error:
+            logging.getLogger(__name__).exception("API request failed: %s %s", method, route)
+            self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", str(error))
+
+    def _classify(self) -> dict:
+        body = self._read_json()
+        return classify(_absolute_paths(body), recursive=_bool(body, "recursive"))
+
+    def _convert(self) -> dict:
+        body = self._read_json()
+        options = {
+            "mode": body.get("mode", "ocr_markdown"),
+            "languages": _string_list(body, "languages") or None,
+            "output_dir": body.get("output_dir") or None,
+            "recursive": _bool(body, "recursive"),
+            "include_content": _bool(body, "include_content"),
+        }
+        if options["output_dir"] is not None and not isinstance(options["output_dir"], str):
+            raise ServiceError("invalid_request", "'output_dir' must be a string.")
+        paths = _absolute_paths(body)
+        if "files" not in body:
+            if not paths:
+                raise ServiceError("invalid_request", "Send 'paths' or 'files'.")
+            return convert(paths, self.app_paths, **options)
+
+        with tempfile.TemporaryDirectory(prefix="markitdowntool_upload_") as folder:
+            uploads = _write_uploads(body["files"], Path(folder))
+            result = convert([*paths, *uploads], self.app_paths, **options)
+        upload_sources = {str(path): path.name for path in uploads}
+        for item in result["files"]:
+            if item["source"] in upload_sources:
+                item["source"] = upload_sources[item["source"]]
+                item["uploaded"] = True
+        return result
+
+    def do_GET(self) -> None:
+        self._dispatch("GET")
+
+    def do_POST(self) -> None:
+        self._dispatch("POST")
+
+
+def create_server(paths: AppPaths, host: str = "127.0.0.1", port: int = 8765, token: str | None = None) -> ThreadingHTTPServer:
+    token = token or os.environ.get(TOKEN_ENV) or None
+    if not is_loopback(host) and not token:
+        raise ServiceError("token_required", f"Set --token or {TOKEN_ENV} before binding to a non-loopback address.")
+    handler = type("ConfiguredApiHandler", (ApiHandler,), {"app_paths": paths, "token": token})
+    return ThreadingHTTPServer((host, port), handler)
+
+
+def serve(paths: AppPaths, host: str = "127.0.0.1", port: int = 8765, token: str | None = None) -> int:
+    try:
+        server = create_server(paths, host, port, token)
+    except (ServiceError, OSError) as error:
+        print(f"error: {getattr(error, 'message', error)}", file=sys.stderr)
+        return 2
+    bound_host, bound_port = server.server_address[:2]
+    print(f"MarkitdownTool API {APP_VERSION} listening on http://{bound_host}:{bound_port}/v1 (Ctrl+C to stop)", file=sys.stderr)
+    logging.getLogger(__name__).info("API server started on %s:%s", bound_host, bound_port)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0

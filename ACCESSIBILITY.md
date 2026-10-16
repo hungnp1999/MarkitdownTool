@@ -105,7 +105,7 @@ Issues may be submitted through:
 
 Project Repository:
 
-https://github.com/nguyenphuhung1999-commits/MarkitdownTool
+https://github.com/hungnp1999/MarkitdownTool
 
 ### Direct Contact
 
@@ -188,7 +188,7 @@ Nguyễn Phú Hùng
 
 GitHub:
 
-https://github.com/nguyenphuhung1999-commits/MarkitdownTool
+https://github.com/hungnp1999/MarkitdownTool
 
 Email:
 

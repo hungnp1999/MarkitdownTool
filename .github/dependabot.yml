@@ -19,10 +19,10 @@ updates:
       - "dependencies"
 
     reviewers:
-      - "nguyenphuhung1999-commits"
+      - "hungnp1999"
 
     assignees:
-      - "nguyenphuhung1999-commits"
+      - "hungnp1999"
 
     versioning-strategy: increase
 

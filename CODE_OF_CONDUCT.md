@@ -8,7 +8,7 @@ MarkItDownTool is an independent open-source project maintained by:
 
 Repository:
 
-https://github.com/nguyenphuhung1999-commits/MarkitdownTool
+https://github.com/hungnp1999/MarkitdownTool
 
 This project aims to create a welcoming, respectful, and productive environment for users, contributors, reviewers, and community members.
 
@@ -139,7 +139,7 @@ nguyenphuhung1999@gmail.com
 
 GitHub:
 
-https://github.com/nguyenphuhung1999-commits/MarkitdownTool
+https://github.com/hungnp1999/MarkitdownTool
 
 Reports will be reviewed in a fair and confidential manner whenever reasonably possible.
 

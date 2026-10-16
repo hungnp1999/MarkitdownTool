@@ -2,7 +2,7 @@
 
 !define ROOT_DIR "${__FILEDIR__}\.."
 !define PRODUCT_NAME "MarkitdownTool"
-!define PRODUCT_VERSION "2.1.2"
+!define PRODUCT_VERSION "2.2.0"
 !define PRODUCT_APP_ID "{A63D865D-254C-4A4F-9FC8-0A7FD2D2B146}"
 !define PRODUCT_KEY "Software\MarkitdownTool"
 !define LEGACY_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkitdownTool"
@@ -15,7 +15,7 @@ InstallDirRegKey HKCU "${PRODUCT_KEY}" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 SetOverwrite on
-VIProductVersion "2.1.2.0"
+VIProductVersion "2.2.0.0"
 VIAddVersionKey "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey "ProductVersion" "${PRODUCT_VERSION}"
 VIAddVersionKey "FileDescription" "${PRODUCT_NAME} installer"
@@ -59,6 +59,7 @@ Section "${PRODUCT_NAME} application" MainSection
   SectionIn RO
   SetOutPath "$INSTDIR"
   File "${ROOT_DIR}\dist\markitdown_gui.exe"
+  File "${ROOT_DIR}\dist\markitdowntool.exe"
   File "${ROOT_DIR}\LICENSE.md"
   File "${ROOT_DIR}\DISCLAIMER.md"
   File "${ROOT_DIR}\PRIVACY.md"
@@ -119,6 +120,7 @@ Section un.RemoveApplication "Remove ${PRODUCT_NAME} application"
   RMDir "$SMPROGRAMS\${PRODUCT_NAME}"
   Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
   Delete "$INSTDIR\markitdown_gui.exe"
+  Delete "$INSTDIR\markitdowntool.exe"
   Delete "$INSTDIR\LICENSE.md"
   Delete "$INSTDIR\DISCLAIMER.md"
   Delete "$INSTDIR\PRIVACY.md"

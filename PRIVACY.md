@@ -51,7 +51,7 @@ If this occurs, the privacy documentation will be updated accordingly.
 
 Project Repository:
 
-https://github.com/nguyenphuhung1999-commits/MarkitdownTool
+https://github.com/hungnp1999/MarkitdownTool
 
 Author:
 

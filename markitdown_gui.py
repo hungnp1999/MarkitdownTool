@@ -9,12 +9,12 @@ import threading
 import urllib.error
 import urllib.request
 import webbrowser
-from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from app_paths import build_app_paths, copy_data_preserving_existing, find_application_resource, local_app_data, migrate_legacy_config
+from app_paths import copy_data_preserving_existing, find_application_resource
+from app_runtime import APP_DIR, APP_VERSION, GITHUB_REPOSITORY, IS_FROZEN, cli_command, prepare_runtime, read_config, save_config
 from document_core import (
     BatchResult,
     FileClassification,
@@ -23,8 +23,10 @@ from document_core import (
     ProgressUpdate,
     SUPPORTED_EXTENSIONS,
     classify_file,
+    collect_supported_files,
     find_tesseract,
     get_available_languages,
+    has_subfolders,
     process_batch,
 )
 from i18n import translate
@@ -35,76 +37,18 @@ from language_manager import (
 )
 
 
-APP_VERSION = "2.1.2"
-GITHUB_REPOSITORY = "nguyenphuhung1999-commits/MarkitdownTool"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
 APP_REGISTRY_KEY = r"Software\MarkitdownTool"
-IS_FROZEN = getattr(sys, "frozen", False)
-PROJECT_DIR = Path(sys.executable).parent if IS_FROZEN else Path(__file__).parent
-APP_DIR = PROJECT_DIR
-SETTINGS_DIR = local_app_data() / "MarkitdownTool"
-SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-CONFIG_FILE = SETTINGS_DIR / "config.json"
 
-if IS_FROZEN:
-    migrate_legacy_config(PROJECT_DIR / "config.json", CONFIG_FILE)
-
-
-def _read_config() -> dict:
-    try:
-        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return {"ocr_languages": ["vie", "eng"], "ui_language": "en"}
-    if not isinstance(config, dict):
-        return {"ocr_languages": ["vie", "eng"], "ui_language": "en"}
-    languages = config.get("ocr_languages", ["vie", "eng"])
-    if not isinstance(languages, list):
-        languages = []
-    config["ocr_languages"] = [code for code in languages if isinstance(code, str) and code]
-    if config.get("ui_language") not in {"en", "vi"}:
-        config["ui_language"] = "en"
-    return config
-
-
-STARTUP_CONFIG = _read_config()
-APP_PATHS = build_app_paths(
-    APP_DIR,
-    local_app_data(),
-    STARTUP_CONFIG.get("data_directory"),
-)
+APP_PATHS = prepare_runtime("process")
 DATA_DIR = APP_PATHS.data_dir
 OUTPUT_DIR = APP_PATHS.output_dir
 MARKDOWN_DIR = APP_PATHS.markdown_dir
 OCRPDF_DIR = APP_PATHS.ocr_pdf_dir
-LOG_DIR = APP_PATHS.log_dir
-TESSDATA_DIR = APP_PATHS.tessdata_dir
-
-if IS_FROZEN:
-    copy_data_preserving_existing(PROJECT_DIR / "tesseract" / "tessdata", TESSDATA_DIR)
-
-for directory in (OUTPUT_DIR, MARKDOWN_DIR, OCRPDF_DIR, LOG_DIR):
-    directory.mkdir(parents=True, exist_ok=True)
-TESSDATA_DIR.mkdir(parents=True, exist_ok=True)
-
-LOG_FILE = LOG_DIR / f"process_{datetime.now():%Y%m%d_%H%M%S}.log"
-logging.basicConfig(
-    filename=str(LOG_FILE),
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    encoding="utf-8",
-)
 
 
 def load_config() -> dict:
-    return _read_config()
-
-
-def save_config(config: dict) -> None:
-    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(
-        json.dumps(config, ensure_ascii=False, indent=4),
-        encoding="utf-8",
-    )
+    return read_config()
 
 
 def save_data_directory_registry(path: Path) -> None:
@@ -220,6 +164,8 @@ class MarkitdownApp:
         ttk.Label(toolbar, text=self.t("documents"), style="Section.TLabel").pack(side="left")
         self.add_button = ttk.Button(toolbar, text="＋  " + self.t("add_files"), command=self._add_files)
         self.add_button.pack(side="right", padx=(8, 0))
+        self.add_folder_button = ttk.Button(toolbar, text="＋  " + self.t("add_folder"), command=self._add_folder)
+        self.add_folder_button.pack(side="right", padx=(8, 0))
         self.remove_button = ttk.Button(toolbar, text=self.t("remove_selected"), command=self._remove_selected)
         self.remove_button.pack(side="right", padx=(8, 0))
         self.clear_button = ttk.Button(toolbar, text=self.t("clear_all"), command=self._clear_files)
@@ -341,9 +287,16 @@ class MarkitdownApp:
         ttk.Button(tool_actions, text=self.t("manage_languages"), command=lambda: self._open_language_manager(window)).pack(side="left")
         ttk.Button(tool_actions, text=self.t("select_languages"), command=lambda: self._choose_languages()).pack(side="left", padx=(8, 0))
 
-        ttk.Label(connection, text=self.t("connection_scaffold"), wraplength=660).pack(anchor="w", pady=(0, 16))
-        for key in ("mcp_status", "cli_status", "agent_status"):
-            ttk.Label(connection, text=self.t(key), style="Section.TLabel").pack(anchor="w", pady=5)
+        ttk.Label(connection, text=self.t("connection_intro"), wraplength=680).pack(anchor="w", pady=(0, 10))
+        cli = subprocess.list2cmdline(cli_command())
+        mcp_command, *mcp_args = cli_command("mcp")
+        mcp_config = json.dumps({"mcpServers": {"markitdowntool": {"command": mcp_command, "args": mcp_args}}}, indent=2)
+        for title_key, hint_key, snippet in (
+            ("cli_title", "cli_hint", f"{cli} convert \"D:\\Docs\" --recursive --mode markdown --json"),
+            ("api_title", "api_hint", f"{cli} api --port 8765"),
+            ("mcp_title", "mcp_hint", mcp_config),
+        ):
+            self._connection_snippet(connection, self.t(title_key), self.t(hint_key), snippet)
 
         ttk.Label(about, text=self.t("about_version", version=APP_VERSION), style="Section.TLabel").pack(anchor="w", pady=(0, 8))
         ttk.Label(about, text=self.t("about_author")).pack(anchor="w", pady=(0, 8))
@@ -438,6 +391,26 @@ class MarkitdownApp:
 
         window.grab_set()
 
+    def _connection_snippet(self, parent: tk.Misc, title: str, hint: str, snippet: str) -> None:
+        ttk.Label(parent, text=title, style="Section.TLabel").pack(anchor="w", pady=(8, 2))
+        ttk.Label(parent, text=hint, wraplength=680).pack(anchor="w")
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=(4, 0))
+        lines = snippet.count("\n") + 1
+        text = tk.Text(row, height=min(lines, 8), wrap="none", font=("Consolas", 9), relief="solid", borderwidth=1)
+        text.insert("1.0", snippet)
+        text.configure(state="disabled")
+        text.pack(side="left", fill="x", expand=True)
+        button = ttk.Button(row, text=self.t("copy"))
+
+        def copy() -> None:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(snippet)
+            button.configure(text=self.t("copied"))
+
+        button.configure(command=copy)
+        button.pack(side="left", anchor="n", padx=(8, 0))
+
     @staticmethod
     def _version_key(value: str) -> tuple[int, ...]:
         import re
@@ -486,15 +459,41 @@ class MarkitdownApp:
                 (self.t("filetype_all"), "*.*"),
             ],
         )
+        self._append_files(Path(selected) for selected in paths)
+        self.status.set(self.t("files_selected", count=len(self.files)))
+
+    def _add_folder(self) -> None:
+        selected = filedialog.askdirectory(parent=self.root, title=self.t("choose_folder"), mustexist=True)
+        if not selected:
+            return
+        folder = Path(selected)
+        try:
+            recursive = has_subfolders(folder) and messagebox.askyesno(
+                self.t("add_folder"),
+                self.t("include_subfolders_prompt", folder=folder.name or str(folder)),
+                parent=self.root,
+            )
+            found = collect_supported_files(folder, recursive=recursive)
+        except OSError as error:
+            messagebox.showerror(self.t("add_folder"), str(error), parent=self.root)
+            return
+        if not found:
+            self.status.set(self.t("folder_no_supported_files", folder=folder.name or str(folder)))
+            return
+        added = self._append_files(found)
+        self.status.set(self.t("folder_files_added", added=added, found=len(found), count=len(self.files)))
+
+    def _append_files(self, paths) -> int:
         existing = {str(path.resolve()).casefold() for path in self.files}
-        for selected in paths:
-            path = Path(selected)
+        added = 0
+        for path in paths:
             key = str(path.resolve()).casefold()
             if key not in existing:
                 self.files.append(path)
                 existing.add(key)
                 self._insert_file(path)
-        self.status.set(self.t("files_selected", count=len(self.files)))
+                added += 1
+        return added
 
     def _insert_file(self, path: Path) -> None:
         try:
@@ -990,6 +989,7 @@ class MarkitdownApp:
         self.status.set(status)
         self.start_button.state(["disabled"] if busy else ["!disabled"])
         self.add_button.state(["disabled"] if busy else ["!disabled"])
+        self.add_folder_button.state(["disabled"] if busy else ["!disabled"])
         self.remove_button.state(["disabled"] if busy else ["!disabled"])
         self.clear_button.state(["disabled"] if busy else ["!disabled"])
         self.settings_button.state(["disabled"] if busy else ["!disabled"])

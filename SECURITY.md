@@ -106,7 +106,7 @@ Users are encouraged to watch the repository for notifications regarding securit
 
 Repository:
 
-https://github.com/nguyenphuhung1999-commits/MarkitdownTool
+https://github.com/hungnp1999/MarkitdownTool
 
 ---
 
@@ -115,7 +115,7 @@ https://github.com/nguyenphuhung1999-commits/MarkitdownTool
 Nguyễn Phú Hùng
 
 GitHub:
-https://github.com/nguyenphuhung1999-commits/MarkitdownTool
+https://github.com/hungnp1999/MarkitdownTool
 
 Security Contact:
 nguyenphuhung1999@gmail.com
