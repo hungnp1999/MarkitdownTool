@@ -14,7 +14,10 @@ from threading import Event
 from typing import BinaryIO, Callable, ContextManager, Iterable, Iterator
 
 
-DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".csv"}
+DOCUMENT_EXTENSIONS = {
+    ".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".csv",
+    ".html", ".htm", ".epub", ".txt", ".md", ".json", ".xml",
+}
 # Images have no text layer, so they always go through OCR (image -> searchable PDF -> Markdown).
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 SUPPORTED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS

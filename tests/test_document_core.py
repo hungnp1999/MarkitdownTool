@@ -107,6 +107,12 @@ class ClassificationTests(unittest.TestCase):
                 result = classify_file(name)
                 self.assertEqual((result.supported, result.needs_ocr, result.markdown_eligible), (True, False, True))
 
+    def test_markitdown_text_formats_are_ready(self):
+        for name in ("page.HTML", "page.htm", "book.epub", "notes.txt", "notes.md", "data.json", "data.xml"):
+            with self.subTest(name=name):
+                result = classify_file(name)
+                self.assertEqual((result.supported, result.needs_ocr, result.markdown_eligible), (True, False, True))
+
     def test_other_formats_are_not_supported(self):
         result = classify_file("archive.zip")
 
@@ -375,7 +381,7 @@ class ScanTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         (self.root / "one" / "two").mkdir(parents=True)
-        for name in ("a.pdf", "notes.txt", "~$a.docx", "one/b.docx", "one/two/c.xlsx"):
+        for name in ("a.pdf", "archive.zip", "~$a.docx", "one/b.docx", "one/two/c.xlsx"):
             (self.root / name).write_bytes(b"x")
 
     def tearDown(self):
@@ -394,7 +400,7 @@ class ScanTests(unittest.TestCase):
             (self.root / name).write_bytes(b"x")
         self.assertEqual(
             self.names(recursive=True, include_unsupported=True),
-            ["hidden.pdf", "a.pdf", "notes.txt", "b.docx", "photo.png", "c.xlsx"],
+            ["hidden.pdf", "a.pdf", "archive.zip", "b.docx", "photo.png", "c.xlsx"],
         )
 
     @unittest.skipUnless(os.name == "nt", "hidden attribute is Windows-only")
@@ -404,7 +410,7 @@ class ScanTests(unittest.TestCase):
         for name, attribute in (("Thumbs.db", 0x2), ("desktop.ini", 0x4)):
             (self.root / name).write_bytes(b"x")
             ctypes.windll.kernel32.SetFileAttributesW(str(self.root / name), attribute)
-        self.assertEqual(self.names(include_unsupported=True), ["a.pdf", "notes.txt"])
+        self.assertEqual(self.names(include_unsupported=True), ["a.pdf", "archive.zip"])
 
     def test_depth_limit(self):
         self.assertEqual(self.names(recursive=True, max_depth=2), ["a.pdf", "b.docx", "c.xlsx"])

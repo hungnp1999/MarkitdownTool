@@ -53,6 +53,9 @@ See [CHANGELOG.md](CHANGELOG.md) for versioned release notes.
 | Word, PowerPoint, Excel | `.docx`, `.pptx`, `.xlsx` | Directly |
 | Legacy Excel 97–2003 | `.xls` | Directly (cell values only; macros are never run) |
 | CSV | `.csv` | Directly, as a table (UTF-8, UTF-8 with BOM, or UTF-16) |
+| HTML | `.html`, `.htm` | Directly (remote images are linked, never downloaded) |
+| EPUB | `.epub` | Directly |
+| Text, Markdown, JSON, XML | `.txt`, `.md`, `.json`, `.xml` | Directly, as text |
 | Images | `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp` | Only through OCR (**OCR only** or **OCR then Markdown**) |
 
 Images without resolution metadata, such as phone photos and screenshots, are OCR-processed at 300 DPI. Transparent images are placed on a white background first. Multi-page TIFF files become multi-page PDFs. Legacy `.doc` and `.ppt` files are not supported yet.
