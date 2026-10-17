@@ -13,8 +13,10 @@ from document_core import (
     FileClassification,
     FileStatus,
     ProcessingMode,
+    DEFAULT_IMAGE_DPI,
     ScanLimitExceeded,
     classify_file,
+    prepare_image_input,
     process_batch,
     scan_folder,
 )
@@ -80,12 +82,69 @@ class ClassificationTests(unittest.TestCase):
 
         self.assertTrue(pdf_needs_ocr(Path("invalid.pdf")))
 
-    def test_image_file_is_not_supported(self):
-        result = classify_file("photo.png")
+    def test_image_files_need_ocr(self):
+        for name in ("photo.png", "scan.JPG", "page.tiff", "old.bmp"):
+            with self.subTest(name=name):
+                result = classify_file(name)
+                self.assertEqual(
+                    (result.supported, result.needs_ocr, result.markdown_eligible, result.ocr_eligible),
+                    (True, True, False, True),
+                )
+                self.assertEqual(result.reason, "Ảnh cần OCR trước khi tạo Markdown.")
+
+    def test_legacy_excel_and_csv_are_ready(self):
+        for name in ("old.xls", "data.CSV"):
+            with self.subTest(name=name):
+                result = classify_file(name)
+                self.assertEqual((result.supported, result.needs_ocr, result.markdown_eligible), (True, False, True))
+
+    def test_other_formats_are_not_supported(self):
+        result = classify_file("archive.zip")
 
         self.assertFalse(result.supported)
         self.assertFalse(result.markdown_eligible)
         self.assertFalse(result.ocr_eligible)
+
+
+class ImageInputTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def save(self, name, mode="RGB", **options):
+        from PIL import Image
+
+        path = self.root / name
+        Image.new(mode, (40, 20), (255, 255, 255, 0) if mode == "RGBA" else "white").save(path, **options)
+        return path
+
+    def test_image_with_resolution_passes_through_unchanged(self):
+        path = self.save("dpi.jpg", dpi=(300, 300))
+        with open(path, "rb") as stream:
+            stream.read(5)
+            stream.seek(0)
+            result, options = prepare_image_input(path, stream, self.root)
+            self.assertIs(result, stream)
+            self.assertEqual((stream.tell(), options), (0, {}))
+        self.assertEqual(prepare_image_input(path, None, self.root), (str(path), {}))
+
+    def test_image_without_resolution_gets_the_default_dpi(self):
+        path = self.save("nodpi.jpg")
+        self.assertEqual(prepare_image_input(path, None, self.root)[1], {"image_dpi": DEFAULT_IMAGE_DPI})
+
+    def test_transparent_image_is_flattened_onto_white(self):
+        from PIL import Image
+
+        path = self.save("alpha.png", "RGBA")
+        with open(path, "rb") as stream:
+            result, options = prepare_image_input(path, stream, self.root)
+        self.assertEqual(options, {"image_dpi": DEFAULT_IMAGE_DPI})
+        with Image.open(result) as flattened:
+            self.assertEqual((flattened.format, flattened.mode), ("TIFF", "RGB"))
+            self.assertEqual(flattened.getpixel((0, 0)), (255, 255, 255))
 
 
 class BatchProcessingTests(unittest.TestCase):

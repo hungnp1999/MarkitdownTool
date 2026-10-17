@@ -21,6 +21,7 @@ from document_core import (
     FileStatus,
     ProcessingMode,
     ProgressUpdate,
+    IMAGE_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     classify_file,
     collect_supported_files,
@@ -111,6 +112,8 @@ class MarkitdownApp:
     def _translate_reason(self, reason: str) -> str:
         if reason == "PDF cần OCR trước khi tạo Markdown.":
             return self.t("scanned_needs_ocr")
+        if reason == "Ảnh cần OCR trước khi tạo Markdown.":
+            return self.t("image_needs_ocr")
         if reason == "Định dạng này chưa được hỗ trợ.":
             return self.t("skipped_format")
         return reason
@@ -456,7 +459,7 @@ class MarkitdownApp:
             parent=self.root,
             title=self.t("choose_document"),
             filetypes=[
-                (self.t("filetype_documents_images"), "*.pdf *.docx *.pptx *.xlsx *.png *.jpg *.jpeg *.tif *.tiff *.bmp"),
+                (self.t("filetype_documents_images"), " ".join(f"*{extension}" for extension in sorted(SUPPORTED_EXTENSIONS))),
                 (self.t("filetype_all"), "*.*"),
             ],
         )
@@ -503,7 +506,12 @@ class MarkitdownApp:
             size_text = self.t("file_size_unknown")
         extension = path.suffix.lower()
         supported = extension in SUPPORTED_EXTENSIONS
-        initial_status = self.t("file_status_check_pdf") if extension == ".pdf" else (self.t("file_status_ready") if supported else self.t("file_status_unsupported"))
+        if extension == ".pdf":
+            initial_status = self.t("file_status_check_pdf")
+        elif extension in IMAGE_EXTENSIONS:
+            initial_status = self.t("file_status_ocr_first")
+        else:
+            initial_status = self.t("file_status_ready") if supported else self.t("file_status_unsupported")
         item_id = self.file_table.insert("", "end", text=path.name, values=(extension.upper().lstrip("."), size_text, initial_status))
         self.file_rows[item_id] = path
 

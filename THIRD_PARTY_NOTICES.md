@@ -36,6 +36,24 @@ https://github.com/pdfminer/pdfminer.six
 pdfplumber uses pdfminer.six for PDF parsing. Microsoft MarkItDown uses these
 packages in its PDF conversion path.
 
+## xlrd
+
+License: BSD License
+
+Repository:
+https://github.com/python-excel/xlrd
+
+Microsoft MarkItDown uses xlrd to read legacy Excel (`.xls`) workbooks. xlrd only reads cell data; it does not run macros.
+
+## Pillow
+
+License: MIT-CMU License (HPND)
+
+Repository:
+https://github.com/python-pillow/Pillow
+
+MarkitdownTool uses Pillow to read image resolution and to flatten transparent images before OCR.
+
 ## pypdfium2 and PDFium
 
 pypdfium2 Python bindings: Apache-2.0 or BSD-3-Clause.

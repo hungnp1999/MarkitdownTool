@@ -13,8 +13,8 @@ from integration_service import ServiceError, allowed_roots, classify, convert, 
 
 
 INSTRUCTIONS = (
-    "MarkitdownTool converts local PDF, DOCX, PPTX, and XLSX files to Markdown and can OCR scanned PDFs "
-    "with Tesseract. Paths must be absolute paths on local drives of the machine running this server; network shares are refused. Use classify_documents "
+    "MarkitdownTool converts local PDF, DOCX, PPTX, XLSX, XLS, and CSV files to Markdown and can OCR scanned PDFs "
+    "and images (PNG, JPEG, TIFF, BMP) with Tesseract. Paths must be absolute paths on local drives of the machine running this server; network shares are refused. Use classify_documents "
     "to check files first, convert_documents to process them, list_ocr_languages before choosing OCR languages, "
     "and get_manifest to check capabilities and versions."
 )
@@ -45,8 +45,8 @@ def build_server(paths: AppPaths) -> MCPServer:
     ) -> dict[str, Any]:
         """Convert documents to Markdown and/or searchable PDF.
 
-        mode: "markdown" converts without OCR, "ocr" only makes searchable PDFs from scanned PDFs,
-        "ocr_markdown" OCRs scanned PDFs first and then converts everything to Markdown.
+        mode: "markdown" converts without OCR, "ocr" only makes searchable PDFs from scanned PDFs and images,
+        "ocr_markdown" OCRs scanned PDFs and images first and then converts everything to Markdown.
         languages: Tesseract codes such as ["vie", "eng"]; defaults to the app settings.
         output_dir: absolute folder for results; defaults to the app's output folder.
         recursive: include subfolders when a folder is given.

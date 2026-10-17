@@ -20,6 +20,7 @@ from typing import BinaryIO, Callable, Iterable, Iterator, Sequence
 from app_paths import AppPaths
 from app_runtime import APP_DIR, APP_VERSION, GITHUB_REPOSITORY, cli_command, read_config
 from document_core import (
+    IMAGE_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     FileClassification,
     FileResult,
@@ -60,6 +61,7 @@ DEFAULT_LIMITS = {
 _REASON_CODES = {
     "Định dạng này chưa được hỗ trợ.": ("unsupported_format", "This file format is not supported."),
     "PDF cần OCR trước khi tạo Markdown.": ("needs_ocr", "This PDF needs OCR before Markdown conversion."),
+    "Ảnh cần OCR trước khi tạo Markdown.": ("needs_ocr", "This image needs OCR before Markdown conversion."),
     "Tệp không phù hợp với chế độ đã chọn.": ("not_eligible_for_mode", "The file does not apply to the selected mode."),
 }
 _STAGE_NAMES = {"Bỏ qua": "skipped", "Lỗi": "error", "Hoàn tất": "done"}
@@ -399,7 +401,12 @@ def get_manifest(paths: AppPaths) -> dict:
             "mcp": {"transport": "stdio", "command": cli_command("mcp"), "tools": list(MCP_TOOLS)},
         },
         "formats": [
-            {"extension": extension, "markdown": True, "ocr": extension == ".pdf"}
+            {
+                "extension": extension,
+                "kind": "image" if extension in IMAGE_EXTENSIONS else "document",
+                "markdown": True,
+                "ocr": extension == ".pdf" or extension in IMAGE_EXTENSIONS,
+            }
             for extension in sorted(SUPPORTED_EXTENSIONS)
         ],
         "modes": [mode.value for mode in ProcessingMode],

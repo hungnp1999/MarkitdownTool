@@ -40,7 +40,7 @@ def _print_error(error, as_json: bool) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="markitdowntool",
-        description="Convert PDF, DOCX, PPTX, and XLSX documents to Markdown, with OCR for scanned PDFs.",
+        description="Convert PDF, DOCX, PPTX, XLSX, XLS, and CSV documents to Markdown, with OCR for scanned PDFs and images.",
     )
     parser.add_argument("--version", action="version", version=f"MarkitdownTool {APP_VERSION}")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -51,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-m", "--mode",
         choices=[mode.value for mode in ProcessingMode],
         default=ProcessingMode.OCR_MARKDOWN.value,
-        help="ocr = searchable PDF only, markdown = no OCR, ocr_markdown = OCR scanned PDFs then convert (default).",
+        help="ocr = searchable PDF only, markdown = no OCR, ocr_markdown = OCR scanned PDFs and images then convert (default).",
     )
     convert.add_argument("-l", "--lang", action="append", help="OCR languages, e.g. vie+eng. Defaults to the app settings.")
     convert.add_argument("-o", "--output-dir", help="Absolute folder for results (markdown/ and ocrpdf/ are created inside).")
