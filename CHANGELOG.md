@@ -6,6 +6,9 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ### Added
 
+- Legacy Excel 97–2003 (`.xls`) and CSV (`.csv`) files convert to Markdown in the app, CLI, API, and MCP server (#11).
+- Images (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`) are OCR-processed into searchable PDFs and Markdown in the OCR modes. Previously **Add files** listed them but every batch skipped them (#11). Images without resolution metadata are processed at 300 DPI, and transparent images are flattened onto white, because OCRmyPDF refuses both otherwise. In **Markdown only** mode images are skipped with `reason_code: needs_ocr`.
+- The manifest's `formats` entries include `kind` (`document` or `image`).
 - `markitdowntool manifest`, `GET /v1/manifest`, and the MCP tool `get_manifest` describe the installation's capabilities: interfaces, supported formats, modes, installed OCR languages, engine versions (MarkItDown, OCRmyPDF, pypdfium2, Tesseract), limits, and schema URLs.
 - JSON Schemas for the `manifest`, `info`, `classify`, `convert`, and `error` outputs in `schemas/`, with a compatibility rule for `schema_version`.
 - `classify` and `convert` results include the source file's `size` and `sha256`.

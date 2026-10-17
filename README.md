@@ -1,6 +1,6 @@
 ﻿# MarkitdownTool 2.2.1
 
-A Windows desktop tool for processing PDF, DOCX, PPTX, and XLSX files. Scanned PDFs can be OCR-processed with Tesseract and OCRmyPDF.
+A Windows desktop tool for processing PDF, DOCX, PPTX, XLSX, XLS, and CSV files and images. Scanned PDFs and images can be OCR-processed with Tesseract and OCRmyPDF.
 
 ---
 
@@ -41,15 +41,27 @@ See [CHANGELOG.md](CHANGELOG.md) for versioned release notes.
 
 ## Processing modes
 
-- **OCR only** creates searchable PDFs from scanned PDFs.
+- **OCR only** creates searchable PDFs from scanned PDFs and images.
 - **Markdown only** converts eligible documents without running OCR. The app checks the selected files first and asks whether to continue when some files cannot be converted.
-- **OCR then Markdown** OCR-processes scanned PDFs and creates Markdown for supported documents.
+- **OCR then Markdown** OCR-processes scanned PDFs and images and creates Markdown for supported documents.
+
+## Supported formats
+
+| Format | Extensions | Markdown |
+| --- | --- | --- |
+| PDF | `.pdf` | Directly, or after OCR when a page has no text |
+| Word, PowerPoint, Excel | `.docx`, `.pptx`, `.xlsx` | Directly |
+| Legacy Excel 97–2003 | `.xls` | Directly (cell values only; macros are never run) |
+| CSV | `.csv` | Directly, as a table (UTF-8, UTF-8 with BOM, or UTF-16) |
+| Images | `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp` | Only through OCR (**OCR only** or **OCR then Markdown**) |
+
+Images without resolution metadata, such as phone photos and screenshots, are OCR-processed at 300 DPI. Transparent images are placed on a white background first. Multi-page TIFF files become multi-page PDFs. Legacy `.doc` and `.ppt` files are not supported yet.
 
 Processing runs in the background so the window remains responsive. Cancel stops the batch after the current file finishes. Results, skipped files, and errors are reported separately.
 
 ## Adding documents
 
-Use **Add files** to pick individual documents, or **Add folder** to add every supported document (PDF, DOCX, PPTX, XLSX) in a folder at once. When the folder has subfolders, MarkitdownTool asks whether to include them. Unsupported files and Office lock files (`~$...`) are ignored, and files already in the list are not added twice.
+Use **Add files** to pick individual documents, or **Add folder** to add every supported document and image in a folder at once. When the folder has subfolders, MarkitdownTool asks whether to include them. Unsupported files and Office lock files (`~$...`) are ignored, and files already in the list are not added twice.
 
 ## Integrations: CLI, HTTP API, and MCP
 

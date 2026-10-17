@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import tempfile
 import threading
 import unittest
@@ -50,7 +51,7 @@ class FolderCollectionTests(TempTree):
 
     def test_recursive_includes_subfolders(self):
         found = collect_supported_files(self.root, recursive=True)
-        self.assertEqual([path.name for path in found], ["a.pdf", "b.DOCX", "c.xlsx"])
+        self.assertEqual([path.name for path in found], ["a.pdf", "b.DOCX", "c.xlsx", "d.png"])
 
     def test_has_subfolders(self):
         self.assertTrue(has_subfolders(self.root))
@@ -533,14 +534,16 @@ class ContractTests(TempTree):
         self.validate("manifest", manifest)
         self.validate("info", integration_service.get_info(self.paths))
         self.assertEqual(set(manifest["schemas"]), set(integration_service.SCHEMA_NAMES))
-        self.assertEqual(manifest["formats"][0]["extension"], ".docx")
+        kinds = {item["extension"]: (item["kind"], item["ocr"]) for item in manifest["formats"]}
+        self.assertEqual((kinds[".xls"], kinds[".csv"], kinds[".png"]), (("document", False), ("document", False), ("image", True)))
 
     def test_classify_lists_unsupported_files_with_digests(self):
         result = integration_service.classify([self.root], recursive=True)
         self.validate("classify", result)
         by_name = {Path(item["path"]).name: item for item in result["files"]}
         self.assertEqual(sorted(by_name), ["a.pdf", "b.DOCX", "c.xlsx", "d.png", "notes.txt"])
-        self.assertEqual((by_name["d.png"]["supported"], by_name["d.png"]["reason_code"]), (False, "unsupported_format"))
+        self.assertEqual((by_name["notes.txt"]["supported"], by_name["notes.txt"]["reason_code"]), (False, "unsupported_format"))
+        self.assertEqual((by_name["d.png"]["needs_ocr"], by_name["d.png"]["reason_code"]), (True, "needs_ocr"))
         self.assertEqual(by_name["notes.txt"]["size"], 1)
         self.assertEqual(by_name["notes.txt"]["sha256"], hashlib.sha256(b"x").hexdigest())
 
@@ -576,6 +579,47 @@ class ContractTests(TempTree):
         with patch("app_runtime.prepare_runtime", return_value=self.paths), contextlib.redirect_stdout(stdout):
             self.assertEqual(main(["manifest"]), 0)
         self.validate("manifest", json.loads(stdout.getvalue()))
+
+
+class FormatConversionTests(TempTree):
+    """Real conversions without mocks, for the formats added on top of MarkItDown's defaults."""
+
+    def convert_one(self, path, mode="markdown", **options):
+        return convert([path], self.paths, mode=mode, include_content=True, output_dir=str(self.root / "out"), **options)["files"][0]
+
+    def test_legacy_excel_keeps_vietnamese_text(self):
+        source = self.root / "sample.xls"
+        shutil.copyfile(Path(__file__).parent / "fixtures" / "sample.xls", source)
+        item = self.convert_one(source)
+        self.assertEqual(item["status"], "success")
+        self.assertIn("| TB-01 | Cân điện tử | 2026-03-15 |", item["markdown"])
+
+    def test_csv_in_common_encodings(self):
+        for encoding in ("utf-8", "utf-8-sig", "utf-16"):
+            with self.subTest(encoding=encoding):
+                source = self.root / f"devices-{encoding}.csv"
+                source.write_bytes("Mã,Tên thiết bị\nTB-01,Cân điện tử\n".encode(encoding))
+                item = self.convert_one(source)
+                self.assertEqual(item["status"], "success")
+                self.assertIn("| TB-01 | Cân điện tử |", item["markdown"])
+
+    def test_images_are_skipped_without_ocr(self):
+        item = self.convert_one(self.root / "sub" / "d.png")
+        self.assertEqual((item["status"], item["reason_code"]), ("skipped", "needs_ocr"))
+        self.assertEqual(item["message"], "This image needs OCR before Markdown conversion.")
+
+    @unittest.skipUnless(integration_service.find_tesseract(integration_service.APP_DIR), "needs Tesseract")
+    def test_transparent_image_without_resolution_is_ocred(self):
+        from PIL import Image, ImageDraw, ImageFont
+
+        source = self.root / "photo.png"
+        image = Image.new("RGBA", (1400, 400), (255, 255, 255, 0))
+        ImageDraw.Draw(image).text((60, 140), "INVOICE 2026", fill="black", font=ImageFont.load_default(size=90))
+        image.save(source)
+        with patch.object(integration_service, "read_config", return_value={"ocr_languages": ["eng"]}):
+            item = self.convert_one(source, mode="ocr_markdown", languages=["eng"])
+        self.assertEqual((item["status"], item["stage"]), ("success", "ocr_markdown"), item["message"])
+        self.assertIn("INVOICE 2026", item["markdown"])
 
 
 class McpTests(TempTree):

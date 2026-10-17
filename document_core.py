@@ -4,6 +4,7 @@ import os
 import shutil
 import stat
 import subprocess
+import tempfile
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
@@ -12,7 +13,12 @@ from threading import Event
 from typing import BinaryIO, Callable, ContextManager, Iterable, Iterator
 
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
+DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".csv"}
+# Images have no text layer, so they always go through OCR (image -> searchable PDF -> Markdown).
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+SUPPORTED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
+# Used when an image has no usable resolution metadata; OCRmyPDF refuses such images otherwise.
+DEFAULT_IMAGE_DPI = 300
 
 
 class ProcessingMode(str, Enum):
@@ -118,10 +124,13 @@ def classify_file(file_path: str | Path) -> FileClassification:
     path = Path(file_path)
     extension = path.suffix.lower()
     supported = extension in SUPPORTED_EXTENSIONS
-    needs_ocr = extension == ".pdf" and pdf_needs_ocr(path)
+    is_image = extension in IMAGE_EXTENSIONS
+    needs_ocr = is_image or (extension == ".pdf" and pdf_needs_ocr(path))
 
     if not supported:
         reason = "Định dạng này chưa được hỗ trợ."
+    elif is_image:
+        reason = "Ảnh cần OCR trước khi tạo Markdown."
     elif needs_ocr:
         reason = "PDF cần OCR trước khi tạo Markdown."
     else:
@@ -132,7 +141,7 @@ def classify_file(file_path: str | Path) -> FileClassification:
         supported=supported,
         needs_ocr=needs_ocr,
         markdown_eligible=supported and not needs_ocr,
-        ocr_eligible=extension == ".pdf" and needs_ocr,
+        ocr_eligible=needs_ocr,
         reason=reason,
     )
 
@@ -248,6 +257,45 @@ def hide_ocr_console_windows():
         ocrmypdf_subprocess.Popen = original_popen
 
 
+def _has_alpha(image) -> bool:
+    return image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info
+
+
+def _flatten(frame):
+    from PIL import Image
+
+    rgba = frame.convert("RGBA")
+    background = Image.new("RGB", rgba.size, "white")
+    background.paste(rgba, mask=rgba.getchannel("A"))
+    return background
+
+
+def prepare_image_input(source: Path, stream: BinaryIO | None, work_dir: Path) -> tuple[str | BinaryIO, dict]:
+    """Make an image acceptable to OCRmyPDF, which refuses images without a resolution and
+    images with an alpha channel. Returns the input to pass on and extra OCRmyPDF options."""
+    from PIL import Image, ImageSequence
+
+    with Image.open(stream or source) as image:
+        dpi = image.info.get("dpi")
+        usable_dpi = bool(dpi) and min(dpi) >= 50
+        options = {} if usable_dpi else {"image_dpi": DEFAULT_IMAGE_DPI}
+        if not _has_alpha(image):
+            if stream:
+                stream.seek(0)
+            return stream or str(source), options
+        frames = [_flatten(frame) for frame in ImageSequence.Iterator(image)]
+
+    flattened = work_dir / "flattened.tiff"
+    frames[0].save(
+        flattened,
+        save_all=True,
+        append_images=frames[1:],
+        compression="tiff_deflate",
+        dpi=dpi if usable_dpi else (DEFAULT_IMAGE_DPI, DEFAULT_IMAGE_DPI),
+    )
+    return str(flattened), options
+
+
 def run_ocr(
     source: Path,
     languages: list[str],
@@ -275,19 +323,25 @@ def run_ocr(
         key: os.environ.get(key)
         for key in ("PATH", "TESSDATA_PREFIX")
     }
+    is_image = source.suffix.lower() in IMAGE_EXTENSIONS
     os.environ.update(environment)
     try:
-        with hide_ocr_console_windows():
-            exit_code = ocrmypdf.ocr(
-                stream or str(source),
-                str(output_pdf),
-                language=languages,
-                deskew=True,
-                rotate_pages=True,
-                skip_text=True,
-                progress_bar=False,
-                use_threads=os.name == "nt",
+        with tempfile.TemporaryDirectory(prefix="markitdowntool_image_") if is_image else nullcontext() as work_dir:
+            input_file, image_options = (
+                prepare_image_input(source, stream, Path(work_dir)) if is_image else (stream or str(source), {})
             )
+            with hide_ocr_console_windows():
+                exit_code = ocrmypdf.ocr(
+                    input_file,
+                    str(output_pdf),
+                    language=languages,
+                    deskew=True,
+                    rotate_pages=True,
+                    skip_text=True,
+                    progress_bar=False,
+                    use_threads=os.name == "nt",
+                    **image_options,
+                )
     finally:
         for key, value in previous_environment.items():
             if value is None:

@@ -123,12 +123,20 @@
         "type": "object",
         "required": [
           "extension",
+          "kind",
           "markdown",
           "ocr"
         ],
         "properties": {
           "extension": {
             "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "document",
+              "image"
+            ],
+            "description": "Images always need OCR (mode ocr or ocr_markdown) to produce Markdown."
           },
           "markdown": {
             "type": "boolean"
