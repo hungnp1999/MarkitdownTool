@@ -42,6 +42,7 @@ def build_server(paths: AppPaths) -> MCPServer:
         output_dir: str | None = None,
         recursive: bool = False,
         include_content: bool = True,
+        force_ocr: bool = False,
     ) -> dict[str, Any]:
         """Convert documents to Markdown and/or searchable PDF.
 
@@ -51,6 +52,8 @@ def build_server(paths: AppPaths) -> MCPServer:
         output_dir: absolute folder for results; defaults to the app's output folder.
         recursive: include subfolders when a folder is given.
         include_content: return the Markdown text of each file in the result.
+        force_ocr: OCR every PDF again and replace its text layer. PDFs whose text looks wrongly
+        encoded (reason_code "garbled_text", low text_quality) are re-OCRed automatically.
         """
         return call(
             convert,
@@ -61,6 +64,7 @@ def build_server(paths: AppPaths) -> MCPServer:
             output_dir=output_dir,
             recursive=recursive,
             include_content=include_content,
+            force_ocr=force_ocr,
             roots=roots,
         )
 

@@ -7,7 +7,7 @@ Endpoints (all JSON):
   GET  /v1/languages    installed OCR languages
   POST /v1/classify     {"paths": [...], "recursive": false}
   POST /v1/convert      {"paths": [...] | "files": [{"name", "content_base64"}], "mode", "languages",
-                         "output_dir", "recursive", "include_content"}
+                         "output_dir", "recursive", "include_content", "force_ocr"}
 
 Every endpoint except /v1/health requires a bearer token. Without --token or
 MARKITDOWNTOOL_API_TOKEN the server generates one in the per-user settings folder
@@ -231,6 +231,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             "output_dir": body.get("output_dir") or None,
             "recursive": _bool(body, "recursive"),
             "include_content": _bool(body, "include_content"),
+            "force_ocr": _bool(body, "force_ocr"),
             "roots": self.roots,
         }
         if options["output_dir"] is not None and not isinstance(options["output_dir"], str):

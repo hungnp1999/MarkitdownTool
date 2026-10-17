@@ -1,5 +1,6 @@
 import io
 import os
+import sys
 import shutil
 import tempfile
 import unittest
@@ -8,23 +9,31 @@ from pathlib import Path
 from threading import Event
 from unittest.mock import MagicMock, patch
 
+sys.path.insert(0, str(Path(__file__).parent))
+import pdf_samples  # noqa: E402
 from document_core import (
     BatchResult,
     FileClassification,
     FileStatus,
     ProcessingMode,
     DEFAULT_IMAGE_DPI,
+    PdfTextReport,
     ScanLimitExceeded,
+    analyze_pdf_text,
     classify_file,
+    force_ocr_classification,
+    is_garbled_word,
+    text_quality,
     prepare_image_input,
     process_batch,
+    run_ocr,
     scan_folder,
 )
 
 
 class ClassificationTests(unittest.TestCase):
-    @patch("document_core.pdf_needs_ocr", return_value=True)
-    def test_scanned_pdf_is_ocr_only_in_markdown_preflight(self, _needs_ocr):
+    @patch("document_core.analyze_pdf_text", return_value=PdfTextReport(True, empty_pages=(1,)))
+    def test_scanned_pdf_is_ocr_only_in_markdown_preflight(self, _report):
         result = classify_file("scan.pdf")
 
         self.assertTrue(result.supported)
@@ -104,6 +113,74 @@ class ClassificationTests(unittest.TestCase):
         self.assertFalse(result.supported)
         self.assertFalse(result.markdown_eligible)
         self.assertFalse(result.ocr_eligible)
+
+
+class TextQualityTests(unittest.TestCase):
+    def test_correct_text_in_several_languages_scores_one(self):
+        for text in (
+            "Ngày hiệu chuẩn: 15/03/2026. Thiết bị đạt yêu cầu kỹ thuật.",
+            "Nhiệt độ 25°C ±0.5, độ dày 12 µm, ©2026 Công ty ABC®.",
+            "Größe, façade, naïve, Ærø, São Paulo, Zürich, McDonald's, iPhone.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(text_quality(text)[0], 1)
+
+    def test_garbled_words(self):
+        for word in ("hi�u", "hiÿu", "Ngµy", "®¹t", "hiÖu", "chuÈn", "a\x9bb", "x", "6ҧQ", "6͙"):
+            with self.subTest(word=word):
+                self.assertTrue(is_garbled_word(word))
+        for word in ("25°C", "µm", "ABC®", "«quoted»", "Ærø", "ĐẠT", "Ngày", "10kΩ", "Δt", "Москва", "ngày"):
+            with self.subTest(word=word):
+                self.assertFalse(is_garbled_word(word))
+
+    def test_words_separated_by_control_characters(self):
+        # Seen in real PDFs: pdfium returns U+0003 between words instead of a space.
+        self.assertEqual(text_quality("Người\x03lập\x03biểu (Ký,\x03họ\x03tên) Kế\x03toán\x03trưởng"), (1.0, 9))
+
+    def test_wrongly_encoded_text_scores_low(self):
+        self.assertLess(text_quality("Biªn b¶n kiÓm tra thiÕt bÞ ®o l−êng")[0], 0.5)
+        self.assertLess(text_quality("Ngay hi�u chudn: Thi�t b� �at")[0], 0.5)
+
+    def test_too_little_text_is_not_judged(self):
+        self.assertEqual(text_quality("Trang 3 / 12"), (None, 1))
+
+
+@unittest.skipUnless(pdf_samples.ARIAL.exists(), "needs the Arial font")
+class PdfTextReportTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_correct_text_layer_needs_no_ocr(self):
+        result = classify_file(pdf_samples.make_pdf(self.root / "good.pdf", "good"))
+        self.assertEqual((result.needs_ocr, result.force_ocr, result.text_quality, result.reason), (False, False, 1.0, ""))
+
+    def test_garbled_text_layers_need_forced_ocr_on_those_pages(self):
+        for layers, pages in ((("tcvn3",), (1,)), (("broken",), (1,)), (("good", "tcvn3", "good"), (2,))):
+            with self.subTest(layers=layers):
+                result = classify_file(pdf_samples.make_pdf(self.root / "sample.pdf", *layers))
+                self.assertEqual((result.needs_ocr, result.markdown_eligible, result.force_ocr), (True, False, True))
+                self.assertEqual((result.ocr_pages, result.low_quality_pages), (pages, pages))
+                self.assertEqual(result.reason, "PDF có chữ bị lỗi mã, cần OCR lại.")
+                self.assertLess(result.text_quality, 0.8)
+
+    def test_empty_pages_are_forced_together_with_garbled_ones(self):
+        with patch("document_core.analyze_pdf_text", return_value=PdfTextReport(True, (3,), (1,), 0.2)):
+            self.assertEqual(classify_file("x.pdf").ocr_pages, (1, 3))
+
+    def test_unreadable_pdf(self):
+        path = self.root / "bad.pdf"
+        path.write_bytes(b"not a pdf")
+        self.assertEqual(analyze_pdf_text(path), PdfTextReport(False))
+
+    def test_force_ocr_classification_covers_every_page_of_pdfs_only(self):
+        forced = force_ocr_classification(classify_file(pdf_samples.make_pdf(self.root / "good.pdf", "good")))
+        self.assertEqual((forced.needs_ocr, forced.force_ocr, forced.ocr_pages, forced.markdown_eligible), (True, True, (), False))
+        docx = FileClassification(self.root / "a.docx", True, False, True, False)
+        self.assertIs(force_ocr_classification(docx), docx)
 
 
 class ImageInputTests(unittest.TestCase):
@@ -226,6 +303,35 @@ class BatchProcessingTests(unittest.TestCase):
         run_ocr.assert_called_once()
         self.assertTrue(result.cancelled)
         self.assertEqual(len(result.files), 1)
+
+    def test_forced_pages_reach_ocr_only_for_forced_classifications(self):
+        source = self.project_dir / "scan.pdf"
+        cases = (
+            (FileClassification(source, True, True, False, True), None),
+            (FileClassification(source, True, True, False, True, force_ocr=True, ocr_pages=(2, 5)), (2, 5)),
+            (FileClassification(source, True, True, False, True, force_ocr=True), ()),
+        )
+        for classification, expected in cases:
+            with self.subTest(expected=expected), patch("document_core.run_ocr", return_value=self.ocr_dir / "scan.pdf") as run_ocr:
+                process_batch(
+                    [source], ProcessingMode.OCR, ["eng"], self.project_dir,
+                    self.ocr_dir, self.markdown_dir, classifications=[classification]
+                )
+            self.assertEqual(run_ocr.call_args.args[6], expected)
+
+    def test_run_ocr_replaces_text_only_when_forced(self):
+        import ocrmypdf
+
+        source = self.project_dir / "scan.pdf"
+        for force_pages, expected in (
+            (None, {"skip_text": True}),
+            ((), {"force_ocr": True}),
+            ((2, 5), {"force_ocr": True, "pages": "2,5"}),
+        ):
+            with self.subTest(force_pages=force_pages),                     patch.object(ocrmypdf, "ocr", return_value=ocrmypdf.ExitCode.ok) as ocr,                     patch("document_core.find_tesseract", return_value=None),                     patch("language_manager.prepare_managed_language_data", return_value=None):
+                run_ocr(source, ["eng"], self.ocr_dir, self.project_dir, force_pages=force_pages)
+            options = {key: ocr.call_args.kwargs.get(key) for key in ("skip_text", "force_ocr", "pages")}
+            self.assertEqual({key: value for key, value in options.items() if value is not None}, expected)
 
     def test_open_source_stream_is_passed_to_the_converter(self):
         source = self.project_dir / "report.docx"

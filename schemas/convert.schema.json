@@ -10,7 +10,8 @@
     "cancelled",
     "summary",
     "output_dirs",
-    "files"
+    "files",
+    "force_ocr"
   ],
   "properties": {
     "schema_version": {
@@ -88,7 +89,8 @@
           "reason_code",
           "message",
           "size",
-          "sha256"
+          "sha256",
+          "text_quality"
         ],
         "properties": {
           "source": {
@@ -148,9 +150,21 @@
           "content_omitted": {
             "type": "string",
             "description": "limit_exceeded when max_content_bytes left the Markdown out."
+          },
+          "text_quality": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Share of words in the PDF text layer that look correctly encoded (PDF only; null when there is too little text to judge)."
           }
         }
       }
+    },
+    "force_ocr": {
+      "type": "boolean"
     }
   }
 }

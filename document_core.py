@@ -5,8 +5,9 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import unicodedata
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from threading import Event
@@ -19,6 +20,12 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 SUPPORTED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
 # Used when an image has no usable resolution metadata; OCRmyPDF refuses such images otherwise.
 DEFAULT_IMAGE_DPI = 300
+# Pages whose share of correctly encoded words is below this are OCRed again (force OCR).
+TEXT_QUALITY_THRESHOLD = 0.8
+# Pages with fewer words that contain letters are not judged.
+MIN_JUDGED_WORDS = 3
+# Latin-1 symbols that legitimately touch letters or numbers (25°C, ±0.5, µm, ABC®).
+_COMMON_SYMBOLS = frozenset("°±©®«»§²³¼½¾·µ")
 
 
 class ProcessingMode(str, Enum):
@@ -41,6 +48,19 @@ class FileClassification:
     markdown_eligible: bool
     ocr_eligible: bool
     reason: str = ""
+    text_quality: float | None = None
+    # OCR must replace the existing text layer, on ocr_pages (1-based) or on every page when empty.
+    force_ocr: bool = False
+    ocr_pages: tuple[int, ...] = ()
+    low_quality_pages: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class PdfTextReport:
+    readable: bool
+    empty_pages: tuple[int, ...] = ()
+    low_quality_pages: tuple[int, ...] = ()
+    text_quality: float | None = None
 
 
 @dataclass(frozen=True)
@@ -99,25 +119,100 @@ def get_available_languages(project_dir: Path, data_dir: Path | None = None) -> 
     return [package.code for package in list_language_packages(project_dir, data_dir)]
 
 
-def pdf_needs_ocr(pdf_path: Path) -> bool:
+def _is_broken_char(char: str) -> bool:
+    return char in "�ÿ" or "" <= char <= "" or "\x80" <= char <= "\x9f"
+
+
+def _script(char: str) -> str:
+    return unicodedata.name(char, "").split(" ", 1)[0]
+
+
+def is_garbled_word(word: str) -> bool:
+    """Signs that a word was extracted with the wrong encoding, independent of its language:
+
+    - replacement, private-use or C1 control characters, or U+00FF, which broken encodings
+      produce for every character they cannot map ("hi�u", "hiÿu");
+    - a Latin-1 symbol (U+00A1-U+00BF) between two letters, as TCVN3 fonts produce ("Ngµy"),
+      or an uncommon one anywhere in a word with letters ("®¹t");
+    - an accented Latin capital right after a lowercase letter ("hiÖu", "chuÈn"), which TCVN3
+      produces for lowercase toned vowels;
+    - Latin and Cyrillic letters in one word, or a combining mark that follows no letter,
+      as fonts without a usable Unicode map produce ("3+Ҫ1", "6͙").
+    """
+    has_letters = any(char.isalpha() for char in word)
+    scripts = set()
+    for index, char in enumerate(word):
+        previous = word[index - 1] if index else ""
+        following = word[index + 1] if index + 1 < len(word) else ""
+        if _is_broken_char(char):
+            return True
+        if "¡" <= char <= "¿":
+            if char not in _COMMON_SYMBOLS and has_letters:
+                return True
+            if previous.isalpha() and following.isalpha():
+                return True
+        elif char.isupper() and not char.isascii() and previous.islower() and _script(char) == "LATIN":
+            return True
+        elif unicodedata.category(char) == "Mn" and not (previous.isalpha() or unicodedata.category(previous or " ") == "Mn"):
+            return True
+        if char.isalpha():
+            scripts.add(_script(char))
+    return {"LATIN", "CYRILLIC"} <= scripts
+
+
+def _words(text: str) -> list[str]:
+    # Some PDFs separate words with C0 control characters (often U+0003) instead of spaces.
+    separated = "".join(" " if unicodedata.category(char) == "Cc" else char for char in text)
+    return [word for word in separated.split() if any(char.isalpha() or _is_broken_char(char) for char in word)]
+
+
+def text_quality(text: str) -> tuple[float | None, int]:
+    """Share of words that look correctly encoded, and how many words were judged.
+
+    The score is None when fewer than MIN_JUDGED_WORDS words contain letters.
+    """
+    words = _words(text)
+    if len(words) < MIN_JUDGED_WORDS:
+        return None, len(words)
+    return 1 - sum(is_garbled_word(word) for word in words) / len(words), len(words)
+
+
+def analyze_pdf_text(pdf_path: Path) -> PdfTextReport:
+    """Find pages without text and pages whose text layer looks wrongly encoded."""
     try:
         import pypdfium2 as pdfium
 
+        empty, low_quality = [], []
+        weighted, judged = 0.0, 0
         with pdfium.PdfDocument(str(pdf_path)) as document:
             for page_index in range(len(document)):
                 page = document[page_index]
                 try:
                     text_page = page.get_textpage()
                     try:
-                        if not text_page.get_text_bounded().strip():
-                            return True
+                        text = text_page.get_text_bounded()
                     finally:
                         text_page.close()
                 finally:
                     page.close()
-        return False
+                if not text.strip():
+                    empty.append(page_index + 1)
+                    continue
+                quality, words = text_quality(text)
+                if quality is None:
+                    continue
+                weighted += quality * words
+                judged += words
+                if quality < TEXT_QUALITY_THRESHOLD:
+                    low_quality.append(page_index + 1)
+        return PdfTextReport(True, tuple(empty), tuple(low_quality), round(weighted / judged, 3) if judged else None)
     except Exception:
-        return True
+        return PdfTextReport(False)
+
+
+def pdf_needs_ocr(pdf_path: Path) -> bool:
+    report = analyze_pdf_text(pdf_path)
+    return not report.readable or bool(report.empty_pages or report.low_quality_pages)
 
 
 def classify_file(file_path: str | Path) -> FileClassification:
@@ -125,12 +220,16 @@ def classify_file(file_path: str | Path) -> FileClassification:
     extension = path.suffix.lower()
     supported = extension in SUPPORTED_EXTENSIONS
     is_image = extension in IMAGE_EXTENSIONS
-    needs_ocr = is_image or (extension == ".pdf" and pdf_needs_ocr(path))
+    report = analyze_pdf_text(path) if extension == ".pdf" else PdfTextReport(True)
+    garbled = bool(report.low_quality_pages)
+    needs_ocr = is_image or not report.readable or bool(report.empty_pages) or garbled
 
     if not supported:
         reason = "Định dạng này chưa được hỗ trợ."
     elif is_image:
         reason = "Ảnh cần OCR trước khi tạo Markdown."
+    elif garbled:
+        reason = "PDF có chữ bị lỗi mã, cần OCR lại."
     elif needs_ocr:
         reason = "PDF cần OCR trước khi tạo Markdown."
     else:
@@ -143,6 +242,25 @@ def classify_file(file_path: str | Path) -> FileClassification:
         markdown_eligible=supported and not needs_ocr,
         ocr_eligible=needs_ocr,
         reason=reason,
+        text_quality=report.text_quality,
+        force_ocr=garbled,
+        ocr_pages=tuple(sorted(report.empty_pages + report.low_quality_pages)) if garbled else (),
+        low_quality_pages=report.low_quality_pages,
+    )
+
+
+def force_ocr_classification(classification: FileClassification) -> FileClassification:
+    """Treat a PDF as needing OCR on every page, replacing its text layer (--force-ocr)."""
+    if classification.path.suffix.lower() != ".pdf" or not classification.supported:
+        return classification
+    return replace(
+        classification,
+        needs_ocr=True,
+        markdown_eligible=False,
+        ocr_eligible=True,
+        force_ocr=True,
+        ocr_pages=(),
+        reason=classification.reason or "PDF cần OCR trước khi tạo Markdown.",
     )
 
 
@@ -303,7 +421,10 @@ def run_ocr(
     project_dir: Path,
     data_dir: Path | None = None,
     stream: BinaryIO | None = None,
+    force_pages: tuple[int, ...] | None = None,
 ) -> Path:
+    """OCR into a searchable PDF. Pages that already have text are kept, unless force_pages is
+    given: then the text layer is replaced on those pages, or on every page when it is empty."""
     import ocrmypdf
 
     output_pdf = output_path_for(source, output_dir, ".pdf")
@@ -330,6 +451,12 @@ def run_ocr(
             input_file, image_options = (
                 prepare_image_input(source, stream, Path(work_dir)) if is_image else (stream or str(source), {})
             )
+            if force_pages is None:
+                text_options = {"skip_text": True}
+            else:
+                text_options = {"force_ocr": True}
+                if force_pages:
+                    text_options["pages"] = ",".join(str(page) for page in force_pages)
             with hide_ocr_console_windows():
                 exit_code = ocrmypdf.ocr(
                     input_file,
@@ -337,9 +464,9 @@ def run_ocr(
                     language=languages,
                     deskew=True,
                     rotate_pages=True,
-                    skip_text=True,
                     progress_bar=False,
                     use_threads=os.name == "nt",
+                    **text_options,
                     **image_options,
                 )
     finally:
@@ -427,20 +554,21 @@ def process_batch(
                 progress_callback(ProgressUpdate(index, len(paths), path, "Bỏ qua"))
             continue
 
+        force_pages = classification.ocr_pages if classification.force_ocr else None
         try:
             outputs: list[Path] = []
             with open_source(path) if open_source else nullcontext() as stream:
                 if mode is ProcessingMode.OCR:
                     if progress_callback:
                         progress_callback(ProgressUpdate(index, len(paths), path, "OCR"))
-                    outputs.append(run_ocr(path, languages, ocr_output_dir, project_dir, data_dir, stream))
+                    outputs.append(run_ocr(path, languages, ocr_output_dir, project_dir, data_dir, stream, force_pages))
                     stage = "OCR"
                 else:
                     markdown_source = path
                     if mode is ProcessingMode.OCR_MARKDOWN and classification.needs_ocr:
                         if progress_callback:
                             progress_callback(ProgressUpdate(index, len(paths), path, "OCR"))
-                        ocr_pdf = run_ocr(path, languages, ocr_output_dir, project_dir, data_dir, stream)
+                        ocr_pdf = run_ocr(path, languages, ocr_output_dir, project_dir, data_dir, stream, force_pages)
                         outputs.append(ocr_pdf)
                         markdown_source = ocr_pdf
                     if progress_callback:
