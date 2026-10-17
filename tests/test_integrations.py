@@ -368,22 +368,24 @@ class ApiTokenTests(TempTree):
             token = load_or_create_api_token(token_file)
         self.assertEqual(token_file.read_text(encoding="utf-8"), token)
 
-    def test_cli_prints_and_rotates_the_token(self):
+    def test_cli_creates_and_rotates_the_token_without_printing_it(self):
         from markitdown_cli import main
 
         token_file = self.root / "settings" / "api_token"
-        outputs = []
+        tokens, outputs = [], []
         for argv in (["api-token"], ["api-token", "--rotate", "--json"]):
             stdout, stderr = io.StringIO(), io.StringIO()
             with patch("app_runtime.prepare_runtime", return_value=self.paths), patch("app_runtime.API_TOKEN_FILE", token_file), \
                     contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 self.assertEqual(main(argv), 0)
-            outputs.append(stdout.getvalue())
-        first = outputs[0].strip()
-        rotated = json.loads(outputs[1])
-        self.assertEqual(token_file.read_text(encoding="utf-8"), rotated["token"])
-        self.assertNotEqual(first, rotated["token"])
-        self.assertTrue(rotated["rotated"])
+            tokens.append(token_file.read_text(encoding="utf-8"))
+            outputs.append((stdout.getvalue(), stderr.getvalue()))
+        self.assertEqual(outputs[0][0].strip(), str(token_file))
+        self.assertEqual(json.loads(outputs[1][0]), {"token_file": str(token_file), "rotated": True})
+        self.assertNotEqual(tokens[0], tokens[1])
+        for token in tokens:
+            for stdout_text, stderr_text in outputs:
+                self.assertNotIn(token, stdout_text + stderr_text)
 
 
 class ConvertTests(TempTree):

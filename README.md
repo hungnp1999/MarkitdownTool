@@ -122,9 +122,11 @@ The server binds to `127.0.0.1` by default. Every endpoint except `/v1/health` r
 The generated token can be managed in **Settings → Security** (**Copy token**, **Rotate token**) or from the command line:
 
 ```powershell
-markitdowntool api-token            # print the token
-markitdowntool api-token --rotate   # replace it; add --json for {token, token_file, rotated}
+markitdowntool api-token            # create the token if needed and print the token file's path
+markitdowntool api-token --rotate   # replace the token; add --json for {token_file, rotated}
 ```
+
+The command never prints the token itself, so it cannot end up in terminal history or CI logs. Programs that call the API read the token from that file (for example `Get-Content (markitdowntool api-token)`); to paste it somewhere by hand, use **Copy token** in Settings → Security.
 
 A rotated token takes effect immediately: a running server rereads the token file when it changes, so the old token stops working without a restart. The token file is written with an explicit ACL that grants access only to your account and SYSTEM. Tokens created by older versions keep the inherited `%LOCALAPPDATA%` ACL until they are rotated.
 

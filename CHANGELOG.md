@@ -7,7 +7,7 @@ Notable changes to MarkitdownTool are listed here by release.
 ### Added
 
 - **Settings → Security** (new tab) with an **Allowed folders** list for the CLI, API, and MCP server, saved as `allowed_folders` in `config.json` and used when `MARKITDOWNTOOL_ALLOWED_ROOTS` is not set. `info` / `get_tool_info` report `allowed_roots` and `allowed_roots_source` (#8).
-- API token management: **Copy token** and **Rotate token** in Settings → Security, and `markitdowntool api-token [--rotate] [--json]`. A running API server picks up a rotated token on its next request (#9).
+- API token management: **Copy token** and **Rotate token** in Settings → Security, and `markitdowntool api-token [--rotate] [--json]`, which creates or rotates the token and prints the token file's path, never the token itself. A running API server picks up a rotated token on its next request (#9).
 - Audit log of API requests (client address, method, endpoint, status, file count, duration) in the session log, without paths, content, or tokens (#9).
 - Wrongly encoded PDF text layers are detected. Each PDF gets a `text_quality` score (0–1, the share of words that look correctly encoded). Pages below 0.8 are reported with `reason_code: garbled_text` and `low_quality_pages`, and the OCR modes OCR them again with their text layer replaced, keeping the other pages unchanged. This recovers documents made with legacy Vietnamese fonts (TCVN3), fonts without a Unicode map, and poor earlier OCR. Previously these PDFs counted as having text, so OCR skipped them.
 - `--force-ocr` (CLI) and `force_ocr` (API, MCP) OCR every PDF again and replace its text layer, for damage the check does not catch. `convert` results report `force_ocr`; the manifest reports `text_quality_threshold`.
