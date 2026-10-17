@@ -54,7 +54,7 @@ Guidance for Claude Code sessions working on MarkitdownTool. Keep this file shor
 3. Run the full test suite; for interface changes also smoke-test the CLI/API/MCP.
 4. Open a PR with `gh pr create --body-file ...`; the maintainer approves merges.
 5. CodeQL (default setup) on a PR only reports alerts on changed lines. After merging, confirm the `main` analysis: `gh api repos/hungnp1999/MarkitdownTool/code-scanning/alerts?state=open`.
-6. Release: bump `APP_VERSION` (`app_runtime.py`), `PRODUCT_VERSION`/`VIProductVersion` (`installer/MarkitdownTool.nsi`) and the README title; build from `main`; smoke-test `dist\markitdowntool.exe`; `gh release create vX.Y.Z` with `MarkitdownTool-Setup.exe`, `markitdown_gui.exe`, `markitdowntool.exe` and their SHA-256 in the notes.
+6. Release (step by step in the `release` skill, `.claude/skills/release/`): bump `APP_VERSION` (`app_runtime.py`), `PRODUCT_VERSION`/`VIProductVersion` (`installer/MarkitdownTool.nsi`) and the README title; build from `main`; smoke-test `dist\markitdowntool.exe`; `gh release create vX.Y.Z` with `MarkitdownTool-Setup.exe`, `markitdown_gui.exe`, `markitdowntool.exe` and their SHA-256 in the notes.
 
 ## Backlog
 
