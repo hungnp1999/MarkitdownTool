@@ -23,6 +23,7 @@ from document_core import (
     classify_file,
     force_ocr_classification,
     is_garbled_word,
+    is_junction,
     text_quality,
     prepare_image_input,
     process_batch,
@@ -429,6 +430,17 @@ class ScanTests(unittest.TestCase):
         (outside / "secret.docx").write_bytes(b"x")
         _winapi.CreateJunction(str(outside), str(self.root / "link"))
         self.assertEqual(self.names(recursive=True), ["a.pdf", "b.docx", "c.xlsx"])
+
+    @unittest.skipUnless(os.name == "nt", "junctions are Windows-only")
+    def test_is_junction_detects_only_junctions(self):
+        import _winapi
+
+        _winapi.CreateJunction(str(self.root / "one"), str(self.root / "link"))
+        self.assertTrue(is_junction(str(self.root / "link")))
+        self.assertTrue(is_junction(self.root / "link"))
+        self.assertFalse(is_junction(str(self.root / "one")))
+        self.assertFalse(is_junction(str(self.root / "a.pdf")))
+        self.assertFalse(is_junction(str(self.root / "missing")))
 
 
 if __name__ == "__main__":

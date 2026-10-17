@@ -170,10 +170,10 @@ class PathPolicyTests(TempTree):
     def test_links_to_network_targets_are_refused_before_realpath(self):
         roots = self.roots(self.root)
         link = os.path.normcase(str(self.root / "sub"))
-        for checker in ("islink", "isjunction"):
+        for checker in ("os.path.islink", "integration_service.is_junction"):
             for target in (r"\\?\UNC\evil\share", r"\\evil\share", r"\??\UNC\evil\share", r"\\.\pipe\x"):
                 with self.subTest(checker=checker, target=target), \
-                        patch(f"os.path.{checker}", side_effect=lambda path: path == link), \
+                        patch(checker, side_effect=lambda path: path == link), \
                         patch("os.readlink", return_value=target), \
                         patch("os.path.realpath") as realpath:
                     with self.assertRaises(ServiceError) as raised:
@@ -186,7 +186,7 @@ class PathPolicyTests(TempTree):
         link = os.path.normcase(str(self.root / "sub"))
         for target in (r"\\?\C:\data", r"\??\Volume{1234}\data", "..\\data", "C:\\data"):
             with self.subTest(target=target), \
-                    patch("os.path.isjunction", side_effect=lambda path: path == link), \
+                    patch("integration_service.is_junction", side_effect=lambda path: path == link), \
                     patch("os.readlink", return_value=target):
                 self.assertEqual(integration_service.ensure_allowed_path(self.root / "sub" / "c.xlsx", roots).name, "c.xlsx")
 

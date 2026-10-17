@@ -2,6 +2,12 @@
 
 Notable changes to MarkitdownTool are listed here by release.
 
+## [Unreleased]
+
+### Fixed
+
+- On Python 3.11 (the version the venv and release build use), `convert` and `classify` through the CLI, API, and MCP server, and folder scanning, failed with `AttributeError` because the junction checks added in 2.3.0 used `os.path.isjunction` and `os.DirEntry.is_junction`, which exist only from Python 3.12. Junctions are now detected through the reparse tag returned by `os.lstat`, which works on 3.11 and still reads the link without following it.
+
 ## [2.3.0] - 2026-10-17
 
 ### Added
