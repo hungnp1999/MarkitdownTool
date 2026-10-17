@@ -4,6 +4,13 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ## [Unreleased]
 
+### Security
+
+- Integrations now read junctions and symlinks along a path without following them and refuse links to network shares or devices before `realpath` opens them, so a link inside an allowed folder can no longer make Windows contact a remote host (#6).
+- Recursive folder scans in the CLI, API, and MCP server no longer enter junctions or symlinked folders (#6).
+- Each file is opened once and the opened handle's real path is checked against the allowed folders before OCR or Markdown conversion reads it, closing the window in which a folder could be swapped for a junction after the path check (#6).
+- Added resource limits for integration requests: `max_files`, `max_scan_depth`, `max_content_bytes`, and `batch_wait_seconds`, configurable under `integration_limits` in `config.json` and shown by `info`. Exceeding one returns `limit_exceeded` (HTTP 413); waiting too long for a running batch returns `busy` (HTTP 503). Markdown beyond `max_content_bytes` is left out of the response with `"content_omitted": "limit_exceeded"` (#7).
+
 ### Changed
 
 - Rewrote the final allowed-folder check in `ensure_allowed_path` as an inline `realpath` + `startswith` guard so CodeQL recognises it as a path sanitiser. Behaviour is unchanged; allowed roots are now stored in canonical letter case.

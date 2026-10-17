@@ -119,6 +119,26 @@ $env:MARKITDOWNTOOL_ALLOWED_ROOTS = "D:\Docs;D:\Results"
 
 A trusted file share can be allowed by listing it there explicitly.
 
+Links are checked without being followed, so a junction or symlink to a network share is refused before Windows opens it. Recursive folder scans do not enter linked folders. Each file is opened once and the opened handle is checked again, so a folder swapped for a junction after the check cannot redirect the conversion.
+
+### Limits
+
+Integration requests are limited so one caller cannot scan a whole drive or block the others. Exceeding a limit returns `limit_exceeded` (HTTP 413) with the limit name in `details`; a batch that cannot start because another one is still running returns `busy` (HTTP 503). The values are shown by `info` and can be changed in `config.json` (in `%LOCALAPPDATA%\MarkitdownTool`):
+
+```json
+"integration_limits": {
+    "max_files": 2000,
+    "max_scan_depth": 16,
+    "max_content_bytes": 52428800,
+    "batch_wait_seconds": 300
+}
+```
+
+- `max_files`: files in one request, after folders are expanded.
+- `max_scan_depth`: subfolder levels a recursive scan may enter.
+- `max_content_bytes`: total Markdown embedded with `include_content`. Files beyond it still convert but get `"markdown": null` and `"content_omitted": "limit_exceeded"`; read them from `outputs`.
+- `batch_wait_seconds`: how long a request waits for a running batch.
+
 ## OCR languages
 
 Use **OCR Languages** to review installed language packages. Packages installed by MarkitdownTool are downloaded from the official `tesseract-ocr/tessdata_fast` repository and stored in the application's `tesseract/tessdata` folder. They can be removed from the app there. Languages supplied by a system Tesseract installation are read-only and are not modified by MarkitdownTool.

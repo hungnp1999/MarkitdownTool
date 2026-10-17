@@ -1,5 +1,9 @@
+import io
+import os
+import shutil
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
 from unittest.mock import MagicMock, patch
@@ -9,8 +13,10 @@ from document_core import (
     FileClassification,
     FileStatus,
     ProcessingMode,
+    ScanLimitExceeded,
     classify_file,
     process_batch,
+    scan_supported_files,
 )
 
 
@@ -161,6 +167,85 @@ class BatchProcessingTests(unittest.TestCase):
         run_ocr.assert_called_once()
         self.assertTrue(result.cancelled)
         self.assertEqual(len(result.files), 1)
+
+    def test_open_source_stream_is_passed_to_the_converter(self):
+        source = self.project_dir / "report.docx"
+        classification = FileClassification(source, True, False, True, False)
+        stream = io.BytesIO(b"x")
+        opened = []
+
+        @contextmanager
+        def open_source(path):
+            opened.append(path)
+            yield stream
+
+        with patch("document_core.convert_markdown", return_value=self.markdown_dir / "report.md") as convert:
+            process_batch(
+                [source], ProcessingMode.MARKDOWN, [], self.project_dir,
+                self.ocr_dir, self.markdown_dir, classifications=[classification], open_source=open_source
+            )
+
+        self.assertEqual(opened, [source])
+        self.assertIs(convert.call_args.kwargs["stream"], stream)
+
+    def test_open_source_failure_marks_only_that_file_failed(self):
+        source = self.project_dir / "report.docx"
+        classification = FileClassification(source, True, False, True, False)
+
+        def open_source(_path):
+            raise PermissionError("moved")
+
+        with patch("document_core.convert_markdown") as convert:
+            result = process_batch(
+                [source], ProcessingMode.MARKDOWN, [], self.project_dir,
+                self.ocr_dir, self.markdown_dir, classifications=[classification], open_source=open_source
+            )
+
+        convert.assert_not_called()
+        self.assertEqual((result.files[0].status, result.files[0].message), (FileStatus.FAILED, "moved"))
+
+
+class ScanTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        (self.root / "one" / "two").mkdir(parents=True)
+        for name in ("a.pdf", "notes.txt", "~$a.docx", "one/b.docx", "one/two/c.xlsx"):
+            (self.root / name).write_bytes(b"x")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def names(self, **options):
+        return [path.name for path in scan_supported_files(self.root, **options)]
+
+    def test_matches_collect_supported_files(self):
+        self.assertEqual(self.names(), ["a.pdf"])
+        self.assertEqual(self.names(recursive=True), ["a.pdf", "b.docx", "c.xlsx"])
+
+    def test_depth_limit(self):
+        self.assertEqual(self.names(recursive=True, max_depth=2), ["a.pdf", "b.docx", "c.xlsx"])
+        self.assertEqual(self.names(max_depth=0), ["a.pdf"])
+        with self.assertRaises(ScanLimitExceeded) as raised:
+            scan_supported_files(self.root, recursive=True, max_depth=1)
+        self.assertEqual((raised.exception.limit, raised.exception.value), ("max_scan_depth", 1))
+
+    def test_file_limit_stops_the_scan(self):
+        self.assertEqual(len(self.names(recursive=True, max_files=3)), 3)
+        with self.assertRaises(ScanLimitExceeded) as raised:
+            scan_supported_files(self.root, recursive=True, max_files=2)
+        self.assertEqual(raised.exception.limit, "max_files")
+
+    @unittest.skipUnless(os.name == "nt", "junctions are Windows-only")
+    def test_linked_folders_are_not_entered(self):
+        import _winapi
+
+        outside = Path(self.temp_dir.name + "_outside")
+        outside.mkdir()
+        self.addCleanup(shutil.rmtree, outside)
+        (outside / "secret.docx").write_bytes(b"x")
+        _winapi.CreateJunction(str(outside), str(self.root / "link"))
+        self.assertEqual(self.names(recursive=True), ["a.pdf", "b.docx", "c.xlsx"])
 
 
 if __name__ == "__main__":

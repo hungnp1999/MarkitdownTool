@@ -132,6 +132,124 @@ class PathPolicyTests(TempTree):
         self.assertTrue(roots)
         self.assertFalse(any(root.startswith(("\\\\", "//")) for root in roots))
 
+    def test_links_to_network_targets_are_refused_before_realpath(self):
+        roots = self.roots(self.root)
+        link = os.path.normcase(str(self.root / "sub"))
+        for checker in ("islink", "isjunction"):
+            for target in (r"\\?\UNC\evil\share", r"\\evil\share", r"\??\UNC\evil\share", r"\\.\pipe\x"):
+                with self.subTest(checker=checker, target=target), \
+                        patch(f"os.path.{checker}", side_effect=lambda path: path == link), \
+                        patch("os.readlink", return_value=target), \
+                        patch("os.path.realpath") as realpath:
+                    with self.assertRaises(ServiceError) as raised:
+                        integration_service.ensure_allowed_path(self.root / "sub" / "c.xlsx", roots)
+                    self.assertEqual(raised.exception.code, "path_not_allowed")
+                    realpath.assert_not_called()
+
+    def test_links_to_local_targets_are_resolved_as_before(self):
+        roots = self.roots(self.root)
+        link = os.path.normcase(str(self.root / "sub"))
+        for target in (r"\\?\C:\data", r"\??\Volume{1234}\data", "..\\data", "C:\\data"):
+            with self.subTest(target=target), \
+                    patch("os.path.isjunction", side_effect=lambda path: path == link), \
+                    patch("os.readlink", return_value=target):
+                self.assertEqual(integration_service.ensure_allowed_path(self.root / "sub" / "c.xlsx", roots).name, "c.xlsx")
+
+    def test_open_verified_reads_the_checked_file(self):
+        roots = self.roots(self.root)
+        path = integration_service.ensure_allowed_path(self.root / "a.pdf", roots)
+        with integration_service.open_verified(path, roots) as stream:
+            self.assertEqual(stream.read(), b"x")
+
+    @unittest.skipUnless(os.name == "nt", "junctions are Windows-only")
+    def test_folder_swapped_for_a_junction_after_the_check_is_refused(self):
+        import _winapi
+
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "c.xlsx").write_bytes(b"secret")
+        roots = self.roots(self.root / "sub")
+        checked = integration_service.ensure_allowed_path(self.root / "sub" / "c.xlsx", roots)
+        (self.root / "sub").rename(self.root / "moved")
+        _winapi.CreateJunction(str(outside), str(self.root / "sub"))
+        with self.assertRaises(ServiceError) as raised:
+            with integration_service.open_verified(checked, roots):
+                pass
+        self.assertEqual(raised.exception.code, "path_not_allowed")
+
+
+class LimitTests(TempTree):
+    def limits(self, **overrides):
+        return {**integration_service.DEFAULT_LIMITS, **overrides}
+
+    def test_config_overrides_only_valid_positive_integers(self):
+        limits = integration_service.integration_limits(
+            {"integration_limits": {"max_files": 5, "max_scan_depth": 0, "max_content_bytes": "big", "batch_wait_seconds": True}}
+        )
+        self.assertEqual(limits, self.limits(max_files=5))
+        self.assertEqual(integration_service.integration_limits({"integration_limits": []}), self.limits())
+
+    def test_too_many_files_is_a_limit_error(self):
+        self.assertEqual(len(expand_inputs([self.root], limits=self.limits(max_files=2))), 2)
+        for inputs in ([self.root], [self.root / "a.pdf", self.root / "b.DOCX", self.root / "notes.txt"]):
+            with self.subTest(inputs=inputs), self.assertRaises(ServiceError) as raised:
+                expand_inputs(inputs, recursive=True, limits=self.limits(max_files=2))
+            self.assertEqual(raised.exception.code, "limit_exceeded")
+            self.assertEqual(raised.exception.details, {"limit": "max_files", "value": 2})
+
+    def test_deep_folders_are_a_limit_error(self):
+        self.assertEqual(expand_inputs([self.root], recursive=True, limits=self.limits(max_scan_depth=1))[-1].name, "c.xlsx")
+        (self.root / "sub" / "deeper").mkdir()
+        with self.assertRaises(ServiceError) as raised:
+            expand_inputs([self.root], recursive=True, limits=self.limits(max_scan_depth=1))
+        self.assertEqual(raised.exception.details, {"limit": "max_scan_depth", "value": 1})
+
+    def test_info_reports_the_limits(self):
+        self.assertEqual(integration_service.get_info(self.paths)["limits"], integration_service.integration_limits())
+
+
+class ConvertLimitTests(TempTree):
+    def fake_batch(self, files, mode, languages, project_dir, ocr_dir, markdown_dir, **kwargs):
+        markdown_dir.mkdir(parents=True, exist_ok=True)
+        results = []
+        for index, path in enumerate(files):
+            output = markdown_dir / f"{index}.md"
+            output.write_text("12345", encoding="utf-8")
+            results.append(FileResult(Path(path), FileStatus.SUCCESS, "Markdown", (output,)))
+        return BatchResult(tuple(results))
+
+    def run_convert(self, limits, **options):
+        inputs = [self.root / "a.pdf", self.root / "b.DOCX"]
+        with patch.object(integration_service, "integration_limits", return_value={**integration_service.DEFAULT_LIMITS, **limits}), \
+                patch.object(integration_service, "classify_file", side_effect=lambda path: classification(path)), \
+                patch.object(integration_service, "process_batch", side_effect=self.fake_batch):
+            return convert(inputs, self.paths, mode="markdown", **options)
+
+    def test_content_beyond_the_budget_is_omitted(self):
+        first, second = self.run_convert({"max_content_bytes": 8}, include_content=True)["files"]
+        self.assertEqual(first["markdown"], "12345")
+        self.assertNotIn("content_omitted", first)
+        self.assertEqual((second["markdown"], second["content_omitted"]), (None, "limit_exceeded"))
+
+    def test_waiting_for_a_running_batch_times_out_as_busy(self):
+        with integration_service._batch_lock:
+            with self.assertRaises(ServiceError) as raised:
+                self.run_convert({"batch_wait_seconds": 0.01})
+        self.assertEqual(raised.exception.code, "busy")
+
+    def test_convert_opens_sources_through_the_verified_handle(self):
+        captured = {}
+
+        def recording_batch(files, *args, **kwargs):
+            captured.update(kwargs)
+            return self.fake_batch(files, *args, **kwargs)
+
+        with patch.object(integration_service, "classify_file", side_effect=lambda path: classification(path)), \
+                patch.object(integration_service, "process_batch", side_effect=recording_batch):
+            convert([self.root / "a.pdf"], self.paths, mode="markdown")
+        with captured["open_source"](self.root / "a.pdf") as stream:
+            self.assertEqual(stream.read(), b"x")
+
 
 class ApiTokenTests(TempTree):
     def test_token_is_generated_once_and_reused(self):
@@ -358,6 +476,12 @@ class ApiTests(TempTree):
     def test_network_paths_are_forbidden(self):
         status, body = self.request("POST", "/v1/classify", {"paths": ["\\\\evil\\share\\a.pdf"]})
         self.assertEqual((status, body["error"]["code"]), (403, "path_not_allowed"))
+
+    def test_limit_errors_are_413(self):
+        limits = {**integration_service.DEFAULT_LIMITS, "max_files": 1}
+        with patch.object(integration_service, "integration_limits", return_value=limits):
+            status, body = self.request("POST", "/v1/classify", {"paths": [str(self.root)]})
+        self.assertEqual((status, body["error"]["code"]), (413, "limit_exceeded"))
 
     def test_unknown_route_and_wrong_method(self):
         self.assertEqual(self.request("GET", "/v1/nope")[0], 404)
