@@ -1,6 +1,8 @@
 import json
 import logging
+import os
 import secrets
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +29,54 @@ def cli_command(*args: str) -> list[str]:
     return [str(python if python.exists() else Path(sys.executable)), str(APP_DIR / "markitdown_cli.py"), *args]
 
 
+def _system_tool(name: str) -> str:
+    # Full path, so a same-named program earlier on PATH cannot run instead.
+    return os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", name)
+
+
+def _current_user_sid() -> str | None:
+    try:
+        completed = subprocess.run(
+            [_system_tool("whoami.exe"), "/user", "/fo", "csv", "/nh"],
+            capture_output=True, text=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    sid = completed.stdout.strip().rsplit(",", 1)[-1].strip('"')
+    return sid if sid.startswith("S-1-") else None
+
+
+def restrict_to_current_user(path: Path) -> bool:
+    """Allow only the current user (and SYSTEM) to access a file, instead of the inherited ACL."""
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+        return True
+    sid = _current_user_sid()
+    if not sid:
+        return False
+    try:
+        completed = subprocess.run(
+            [_system_tool("icacls.exe"), str(path), "/inheritance:r", "/grant:r", f"*{sid}:F", "*S-1-5-18:F"],
+            capture_output=True, text=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+def _write_api_token(token_file: Path, token: str) -> None:
+    # The new file is restricted before it replaces the old one, so the token is never readable through an inherited ACL.
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = token_file.with_name(f"{token_file.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        temporary.write_text(token, encoding="utf-8")
+        if not restrict_to_current_user(temporary):
+            logging.getLogger(__name__).warning("Could not restrict access to the API token file.")
+        os.replace(temporary, token_file)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def load_or_create_api_token(token_file: Path | None = None) -> str:
     """Return the local API token, creating a random one on first use."""
     token_file = token_file or API_TOKEN_FILE
@@ -37,8 +87,15 @@ def load_or_create_api_token(token_file: Path | None = None) -> str:
     except OSError:
         pass
     token = secrets.token_urlsafe(32)
-    token_file.parent.mkdir(parents=True, exist_ok=True)
-    token_file.write_text(token, encoding="utf-8")
+    _write_api_token(token_file, token)
+    return token
+
+
+def rotate_api_token(token_file: Path | None = None) -> str:
+    """Replace the local API token with a new random one. Running API servers that use the
+    generated token switch to the new one on their next request."""
+    token = secrets.token_urlsafe(32)
+    _write_api_token(token_file or API_TOKEN_FILE, token)
     return token
 
 

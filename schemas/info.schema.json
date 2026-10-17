@@ -13,7 +13,9 @@
     "data_dir",
     "markdown_dir",
     "ocr_pdf_dir",
-    "log_dir"
+    "log_dir",
+    "allowed_roots",
+    "allowed_roots_source"
   ],
   "properties": {
     "name": {
@@ -92,6 +94,21 @@
     },
     "log_dir": {
       "type": "string"
+    },
+    "allowed_roots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Folders the CLI, API and MCP server may read and write."
+    },
+    "allowed_roots_source": {
+      "enum": [
+        "environment",
+        "config",
+        "local_drives"
+      ],
+      "description": "MARKITDOWNTOOL_ALLOWED_ROOTS, config.json allowed_folders, or every local drive."
     }
   }
 }

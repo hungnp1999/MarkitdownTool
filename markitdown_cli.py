@@ -79,6 +79,10 @@ def build_parser() -> argparse.ArgumentParser:
     info = commands.add_parser("info", help="Show version, OCR runtime, and data folders.")
     info.add_argument("--json", action="store_true", help="Print a machine-readable JSON result.")
 
+    api_token = commands.add_parser("api-token", help="Print the generated HTTP API token, or replace it with --rotate.")
+    api_token.add_argument("--rotate", action="store_true", help="Create a new token; clients using the old one stop working.")
+    api_token.add_argument("--json", action="store_true", help="Print a machine-readable JSON result.")
+
     api = commands.add_parser("api", help="Run the local HTTP API server.")
     api.add_argument("--host", default="127.0.0.1", help="Address to bind (default 127.0.0.1).")
     api.add_argument("--port", type=int, default=8765, help="Port to listen on (default 8765).")
@@ -139,6 +143,19 @@ def _run_classify(args) -> int:
     return EXIT_OK
 
 
+def _run_api_token(args) -> int:
+    from app_runtime import API_TOKEN_FILE, load_or_create_api_token, rotate_api_token
+
+    token = rotate_api_token() if args.rotate else load_or_create_api_token()
+    if args.json:
+        _print_json({"token": token, "token_file": str(API_TOKEN_FILE), "rotated": args.rotate})
+    else:
+        print(token)
+        note = " Running API servers switch to the new token on their next request." if args.rotate else ""
+        print(f"Token file: {API_TOKEN_FILE}.{note}", file=sys.stderr)
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -159,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
 
         serve(paths)
         return EXIT_OK
+    if args.command == "api-token":
+        return _run_api_token(args)
 
     as_json = getattr(args, "json", False)
     try:

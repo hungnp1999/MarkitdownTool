@@ -14,7 +14,19 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from app_paths import copy_data_preserving_existing, find_application_resource
-from app_runtime import API_TOKEN_FILE, APP_DIR, APP_VERSION, GITHUB_REPOSITORY, IS_FROZEN, cli_command, prepare_runtime, read_config, save_config
+from app_runtime import (
+    API_TOKEN_FILE,
+    APP_DIR,
+    APP_VERSION,
+    GITHUB_REPOSITORY,
+    IS_FROZEN,
+    cli_command,
+    load_or_create_api_token,
+    prepare_runtime,
+    read_config,
+    rotate_api_token,
+    save_config,
+)
 from document_core import (
     BatchResult,
     FileClassification,
@@ -31,6 +43,7 @@ from document_core import (
     process_batch,
 )
 from i18n import translate
+from integration_service import ALLOWED_ROOTS_ENV
 from language_manager import (
     install_language,
     list_language_packages,
@@ -239,10 +252,12 @@ class MarkitdownApp:
         general = ttk.Frame(notebook, padding=18)
         tools = ttk.Frame(notebook, padding=18)
         connection = ttk.Frame(notebook, padding=18)
+        security = ttk.Frame(notebook, padding=18)
         about = ttk.Frame(notebook, padding=18)
         notebook.add(general, text=self.t("general"))
         notebook.add(tools, text=self.t("tools"))
         notebook.add(connection, text=self.t("connection"))
+        notebook.add(security, text=self.t("security"))
         notebook.add(about, text=self.t("about"))
 
         ttk.Label(general, text=self.t("display_language"), style="Section.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 7))
@@ -304,6 +319,41 @@ class MarkitdownApp:
             self._connection_snippet(connection, self.t(title_key), self.t(hint_key, token_file=API_TOKEN_FILE), snippet)
         ttk.Label(connection, text=self.t("integration_roots_hint"), wraplength=680).pack(anchor="w", pady=(10, 0))
 
+        ttk.Label(security, text=self.t("allowed_folders_title"), style="Section.TLabel").pack(anchor="w", pady=(0, 4))
+        ttk.Label(security, text=self.t("allowed_folders_hint"), wraplength=680).pack(anchor="w")
+        if os.environ.get(ALLOWED_ROOTS_ENV):
+            ttk.Label(security, text=self.t("allowed_folders_env_active", variable=ALLOWED_ROOTS_ENV), wraplength=680).pack(anchor="w", pady=(4, 0))
+        folder_row = ttk.Frame(security)
+        folder_row.pack(fill="x", pady=(6, 0))
+        folder_list = tk.Listbox(folder_row, height=5, activestyle="none", selectmode="extended")
+        folder_list.pack(side="left", fill="x", expand=True)
+        configured_folders = self.config.get("allowed_folders")
+        for folder in configured_folders if isinstance(configured_folders, list) else []:
+            if isinstance(folder, str):
+                folder_list.insert("end", folder)
+        folder_buttons = ttk.Frame(folder_row)
+        folder_buttons.pack(side="left", anchor="n", padx=(8, 0))
+        ttk.Button(folder_buttons, text=self.t("add_allowed_folder"), command=lambda: add_allowed_folder()).pack(fill="x")
+        ttk.Button(folder_buttons, text=self.t("remove_allowed_folder"), command=lambda: remove_allowed_folders()).pack(fill="x", pady=(6, 0))
+
+        ttk.Separator(security).pack(fill="x", pady=16)
+        ttk.Label(security, text=self.t("api_token_title"), style="Section.TLabel").pack(anchor="w", pady=(0, 4))
+        ttk.Label(security, text=self.t("api_token_hint", token_file=API_TOKEN_FILE), wraplength=680).pack(anchor="w")
+        token_row = ttk.Frame(security)
+        token_row.pack(fill="x", pady=(6, 0))
+        token_text = tk.StringVar(value=self.t("token_not_created"))
+        try:
+            existing_token = API_TOKEN_FILE.read_text(encoding="utf-8").strip()
+        except OSError:
+            existing_token = ""
+        if existing_token:
+            token_text.set(self._masked_token(existing_token))
+        ttk.Label(token_row, textvariable=token_text, font=("Consolas", 9)).pack(side="left")
+        ttk.Button(token_row, text=self.t("copy_token"), command=lambda: copy_token()).pack(side="left", padx=(12, 0))
+        ttk.Button(token_row, text=self.t("rotate_token"), command=lambda: rotate_token()).pack(side="left", padx=(8, 0))
+        token_status = tk.StringVar(value="")
+        ttk.Label(security, textvariable=token_status, wraplength=680).pack(anchor="w", pady=(6, 0))
+
         ttk.Label(about, text=self.t("about_version", version=APP_VERSION), style="Section.TLabel").pack(anchor="w", pady=(0, 8))
         ttk.Label(about, text=self.t("about_author")).pack(anchor="w", pady=(0, 8))
         ttk.Button(about, text=self.t("open_repository"), command=lambda: webbrowser.open(f"https://github.com/{GITHUB_REPOSITORY}")).pack(anchor="w", pady=(0, 12))
@@ -330,6 +380,49 @@ class MarkitdownApp:
             for path in self.files:
                 self._insert_file(path)
             self._refresh_language_label()
+
+        def save_allowed_folders() -> None:
+            self.config["allowed_folders"] = list(folder_list.get(0, "end"))
+            save_config(self.config)
+            logging.getLogger(__name__).info("Allowed folders updated: count=%d", folder_list.size())
+
+        def add_allowed_folder() -> None:
+            selected = filedialog.askdirectory(parent=window)
+            if not selected:
+                return
+            folder = os.path.normpath(selected)
+            if folder.casefold() not in {item.casefold() for item in folder_list.get(0, "end")}:
+                folder_list.insert("end", folder)
+                save_allowed_folders()
+
+        def remove_allowed_folders() -> None:
+            for index in reversed(folder_list.curselection()):
+                folder_list.delete(index)
+            save_allowed_folders()
+
+        def put_token_on_clipboard(token: str) -> None:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(token)
+            token_text.set(self._masked_token(token))
+
+        def copy_token() -> None:
+            try:
+                put_token_on_clipboard(load_or_create_api_token())
+            except OSError as error:
+                token_status.set(self.t("token_unavailable", error=error))
+                return
+            token_status.set(self.t("token_copied"))
+
+        def rotate_token() -> None:
+            if not messagebox.askyesno(self.t("rotate_token"), self.t("rotate_token_confirm"), parent=window):
+                return
+            try:
+                put_token_on_clipboard(rotate_api_token())
+            except OSError as error:
+                token_status.set(self.t("token_unavailable", error=error))
+                return
+            logging.getLogger(__name__).info("API token rotated from Settings.")
+            token_status.set(self.t("token_rotated"))
 
         def browse_data_directory() -> None:
             selected = filedialog.askdirectory(parent=window, initialdir=data_path.get() or str(DATA_DIR))
@@ -396,6 +489,10 @@ class MarkitdownApp:
             threading.Thread(target=request_release, daemon=True).start()
 
         window.grab_set()
+
+    @staticmethod
+    def _masked_token(token: str) -> str:
+        return "\u2022" * 12 + token[-4:]
 
     def _connection_snippet(self, parent: tk.Misc, title: str, hint: str, snippet: str) -> None:
         ttk.Label(parent, text=title, style="Section.TLabel").pack(anchor="w", pady=(8, 2))

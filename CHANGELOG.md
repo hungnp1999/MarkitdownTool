@@ -6,6 +6,9 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ### Added
 
+- **Settings → Security** (new tab) with an **Allowed folders** list for the CLI, API, and MCP server, saved as `allowed_folders` in `config.json` and used when `MARKITDOWNTOOL_ALLOWED_ROOTS` is not set. `info` / `get_tool_info` report `allowed_roots` and `allowed_roots_source` (#8).
+- API token management: **Copy token** and **Rotate token** in Settings → Security, and `markitdowntool api-token [--rotate] [--json]`. A running API server picks up a rotated token on its next request (#9).
+- Audit log of API requests (client address, method, endpoint, status, file count, duration) in the session log, without paths, content, or tokens (#9).
 - Wrongly encoded PDF text layers are detected. Each PDF gets a `text_quality` score (0–1, the share of words that look correctly encoded). Pages below 0.8 are reported with `reason_code: garbled_text` and `low_quality_pages`, and the OCR modes OCR them again with their text layer replaced, keeping the other pages unchanged. This recovers documents made with legacy Vietnamese fonts (TCVN3), fonts without a Unicode map, and poor earlier OCR. Previously these PDFs counted as having text, so OCR skipped them.
 - `--force-ocr` (CLI) and `force_ocr` (API, MCP) OCR every PDF again and replace its text layer, for damage the check does not catch. `convert` results report `force_ocr`; the manifest reports `text_quality_threshold`.
 - Legacy Excel 97–2003 (`.xls`) and CSV (`.csv`) files convert to Markdown in the app, CLI, API, and MCP server (#11).
@@ -23,6 +26,7 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ### Security
 
+- The generated API token file is written with an explicit ACL for the current user and SYSTEM only, instead of the inherited `%LOCALAPPDATA%` ACL. The file is restricted before it replaces the old one, and `icacls`/`whoami` are run from System32 by full path. Existing tokens get the ACL when they are rotated (#9).
 - Integrations now read junctions and symlinks along a path without following them and refuse links to network shares or devices before `realpath` opens them, so a link inside an allowed folder can no longer make Windows contact a remote host (#6).
 - Recursive folder scans in the CLI, API, and MCP server no longer enter junctions or symlinked folders (#6).
 - Each file is opened once and the opened handle's real path is checked against the allowed folders before OCR or Markdown conversion reads it, closing the window in which a folder could be swapped for a junction after the path check (#6).
