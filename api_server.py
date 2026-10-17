@@ -45,6 +45,8 @@ _ERROR_STATUS = {
     "path_not_allowed": HTTPStatus.FORBIDDEN,
     "tesseract_missing": HTTPStatus.SERVICE_UNAVAILABLE,
     "languages_unavailable": HTTPStatus.SERVICE_UNAVAILABLE,
+    "busy": HTTPStatus.SERVICE_UNAVAILABLE,
+    "limit_exceeded": HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
 }
 
 

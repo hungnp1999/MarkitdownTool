@@ -3,12 +3,12 @@ import logging
 import os
 import shutil
 import subprocess
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from threading import Event
-from typing import Callable, Iterable
+from typing import BinaryIO, Callable, ContextManager, Iterable, Iterator
 
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
@@ -57,6 +57,13 @@ class ProgressUpdate:
 class BatchResult:
     files: tuple[FileResult, ...]
     cancelled: bool = False
+
+
+class ScanLimitExceeded(Exception):
+    def __init__(self, limit: str, value: int):
+        super().__init__(f"Folder scan exceeded {limit}={value}.")
+        self.limit = limit
+        self.value = value
 
 
 def find_tesseract(project_dir: Path) -> str | None:
@@ -133,19 +140,56 @@ def classify_files(file_paths: Iterable[str | Path]) -> tuple[FileClassification
     return tuple(classify_file(path) for path in file_paths)
 
 
+def _is_document_name(name: str) -> bool:
+    return os.path.splitext(name)[1].lower() in SUPPORTED_EXTENSIONS and not name.startswith("~$")
+
+
 def collect_supported_files(folder: str | Path, recursive: bool = False) -> list[Path]:
     root = Path(folder)
     if not root.is_dir():
         raise NotADirectoryError(f"Not a folder: {root}")
     candidates = root.rglob("*") if recursive else root.iterdir()
     return sorted(
-        (
-            path
-            for path in candidates
-            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS and not path.name.startswith("~$")
-        ),
+        (path for path in candidates if path.is_file() and _is_document_name(path.name)),
         key=lambda path: str(path).casefold(),
     )
+
+
+def scan_supported_files(
+    folder: str | Path,
+    recursive: bool = False,
+    max_depth: int | None = None,
+    max_files: int | None = None,
+) -> list[Path]:
+    """Like collect_supported_files, but never follows junctions or symlinks and stops at the limits.
+
+    A linked folder is not entered, because its target may be a network share. A linked file is
+    returned without being opened, so the caller can check where it points first.
+    """
+    root = Path(folder)
+    if not root.is_dir():
+        raise NotADirectoryError(f"Not a folder: {root}")
+    found: list[Path] = []
+
+    def walk(directory: Path, depth: int) -> Iterator[Path]:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.is_symlink() or entry.is_junction():
+                    if _is_document_name(entry.name) and not entry.is_junction():
+                        yield Path(entry.path)
+                elif entry.is_dir(follow_symlinks=False):
+                    if recursive:
+                        if max_depth is not None and depth >= max_depth:
+                            raise ScanLimitExceeded("max_scan_depth", max_depth)
+                        yield from walk(Path(entry.path), depth + 1)
+                elif entry.is_file(follow_symlinks=False) and _is_document_name(entry.name):
+                    yield Path(entry.path)
+
+    for path in walk(root, 0):
+        if max_files is not None and len(found) >= max_files:
+            raise ScanLimitExceeded("max_files", max_files)
+        found.append(path)
+    return sorted(found, key=lambda path: str(path).casefold())
 
 
 def has_subfolders(folder: str | Path) -> bool:
@@ -193,6 +237,7 @@ def run_ocr(
     output_dir: Path,
     project_dir: Path,
     data_dir: Path | None = None,
+    stream: BinaryIO | None = None,
 ) -> Path:
     import ocrmypdf
 
@@ -217,7 +262,7 @@ def run_ocr(
     try:
         with hide_ocr_console_windows():
             exit_code = ocrmypdf.ocr(
-                str(source),
+                stream or str(source),
                 str(output_pdf),
                 language=languages,
                 deskew=True,
@@ -239,11 +284,20 @@ def run_ocr(
     return output_pdf
 
 
-def convert_markdown(source: Path, output_dir: Path, output_source: Path | None = None) -> Path:
-    from markitdown import MarkItDown
+def convert_markdown(
+    source: Path,
+    output_dir: Path,
+    output_source: Path | None = None,
+    stream: BinaryIO | None = None,
+) -> Path:
+    from markitdown import MarkItDown, StreamInfo
 
     logging.getLogger(__name__).info("Markdown conversion started: %s", source.name)
-    result = MarkItDown().convert(str(source))
+    if stream is None:
+        result = MarkItDown().convert(str(source))
+    else:
+        info = StreamInfo(extension=source.suffix.lower(), filename=source.name)
+        result = MarkItDown().convert_stream(stream, stream_info=info)
     output_markdown = output_path_for(output_source or source, output_dir, ".md")
     output_markdown.write_text(result.text_content, encoding="utf-8")
     logging.getLogger(__name__).info("Markdown conversion completed: %s", output_markdown.name)
@@ -269,7 +323,11 @@ def process_batch(
     progress_callback: Callable[[ProgressUpdate], None] | None = None,
     classifications: Iterable[FileClassification] | None = None,
     data_dir: Path | None = None,
+    open_source: Callable[[Path], ContextManager[BinaryIO]] | None = None,
 ) -> BatchResult:
+    """Process files in order. open_source, when given, opens each source file (for example to
+    verify where the opened handle really points); OCR and Markdown then read that stream
+    instead of reopening the path."""
     paths = tuple(Path(path) for path in file_paths)
     classified = tuple(classifications) if classifications is not None else classify_files(paths)
     if len(classified) != len(paths):
@@ -300,29 +358,31 @@ def process_batch(
 
         try:
             outputs: list[Path] = []
-            if mode is ProcessingMode.OCR:
-                if progress_callback:
-                    progress_callback(ProgressUpdate(index, len(paths), path, "OCR"))
-                outputs.append(run_ocr(path, languages, ocr_output_dir, project_dir, data_dir))
-                stage = "OCR"
-            else:
-                markdown_source = path
-                if mode is ProcessingMode.OCR_MARKDOWN and classification.needs_ocr:
+            with open_source(path) if open_source else nullcontext() as stream:
+                if mode is ProcessingMode.OCR:
                     if progress_callback:
                         progress_callback(ProgressUpdate(index, len(paths), path, "OCR"))
-                    ocr_pdf = run_ocr(path, languages, ocr_output_dir, project_dir, data_dir)
-                    outputs.append(ocr_pdf)
-                    markdown_source = ocr_pdf
-                if progress_callback:
-                    progress_callback(ProgressUpdate(index, len(paths), path, "Markdown"))
-                outputs.append(
-                    convert_markdown(
-                        markdown_source,
-                        markdown_output_dir,
-                        output_source=path if markdown_source != path else None,
+                    outputs.append(run_ocr(path, languages, ocr_output_dir, project_dir, data_dir, stream))
+                    stage = "OCR"
+                else:
+                    markdown_source = path
+                    if mode is ProcessingMode.OCR_MARKDOWN and classification.needs_ocr:
+                        if progress_callback:
+                            progress_callback(ProgressUpdate(index, len(paths), path, "OCR"))
+                        ocr_pdf = run_ocr(path, languages, ocr_output_dir, project_dir, data_dir, stream)
+                        outputs.append(ocr_pdf)
+                        markdown_source = ocr_pdf
+                    if progress_callback:
+                        progress_callback(ProgressUpdate(index, len(paths), path, "Markdown"))
+                    outputs.append(
+                        convert_markdown(
+                            markdown_source,
+                            markdown_output_dir,
+                            output_source=path if markdown_source != path else None,
+                            stream=stream if markdown_source == path else None,
+                        )
                     )
-                )
-                stage = "OCR + Markdown" if classification.needs_ocr and mode is ProcessingMode.OCR_MARKDOWN else "Markdown"
+                    stage = "OCR + Markdown" if classification.needs_ocr and mode is ProcessingMode.OCR_MARKDOWN else "Markdown"
 
             results.append(FileResult(path, FileStatus.SUCCESS, stage, tuple(outputs)))
             logger.info(

@@ -8,9 +8,10 @@ import logging
 import os
 import string
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
-from typing import Callable, Iterable, Sequence
+from typing import BinaryIO, Callable, Iterable, Iterator, Sequence
 
 from app_paths import AppPaths
 from app_runtime import APP_DIR, APP_VERSION, GITHUB_REPOSITORY, read_config
@@ -20,17 +21,24 @@ from document_core import (
     FileResult,
     ProcessingMode,
     ProgressUpdate,
+    ScanLimitExceeded,
     classify_file,
-    collect_supported_files,
     find_tesseract,
     get_available_languages,
     process_batch,
+    scan_supported_files,
 )
 
 
 SCHEMA_VERSION = "1"
 ALLOWED_ROOTS_ENV = "MARKITDOWNTOOL_ALLOWED_ROOTS"
 _ALLOWED_DRIVE_TYPES = {2, 3, 5, 6}  # removable, fixed, CD-ROM, RAM disk; excludes network (4)
+DEFAULT_LIMITS = {
+    "max_files": 2000,
+    "max_scan_depth": 16,
+    "max_content_bytes": 50 * 1024 * 1024,
+    "batch_wait_seconds": 300,
+}
 
 _REASON_CODES = {
     "Định dạng này chưa được hỗ trợ.": ("unsupported_format", "This file format is not supported."),
@@ -102,17 +110,53 @@ def _within(path: str, roots: Sequence[str]) -> bool:
     return False
 
 
+def _is_remote_target(target: str) -> bool:
+    r"""True for link targets on a network share (\\host\share, \\?\UNC\...) or a device (\\.\...)."""
+    if target.startswith(("\\\\?\\", "\\??\\")):
+        return target[4:].upper().startswith("UNC\\")
+    return target.startswith(("\\\\", "//"))
+
+
+def _refuse_remote_links(candidate: str, base: str, value: str | Path) -> None:
+    """Check every component below an allowed root without following links.
+
+    os.path.realpath would open each junction or symlink, and Windows contacts the target
+    host (sending the user's NTLM hash) when the target is a network share. islink, isjunction
+    and readlink only read the link itself.
+    """
+    current = base
+    for part in candidate[len(base):].split(os.sep):
+        if not part:
+            continue
+        current = current + os.sep + part
+        if os.path.islink(current) or os.path.isjunction(current):
+            try:
+                target = os.readlink(current)
+            except OSError as error:
+                raise ServiceError("path_not_allowed", "Path contains a link that cannot be read.", {"path": str(value)}) from error
+            if _is_remote_target(target):
+                raise ServiceError("path_not_allowed", "Path contains a link to a network location.", {"path": str(value)})
+
+
 def ensure_allowed_path(value: str | Path, roots: Sequence[str]) -> Path:
     r"""Normalise a caller-supplied path and refuse anything outside the allowed roots.
 
     The first check runs on the string only, so a UNC path such as \\host\share is
     refused before Windows touches the network (which would send the user's NTLM hash).
-    The second check runs after symlinks and junctions are resolved. It is written as
-    normpath/realpath followed by an inline startswith guard on the same variable, the
-    form static analysis (CodeQL py/path-injection) recognises as a path sanitiser.
+    Links along the path are then read without being followed, so a junction to a share
+    is refused before realpath would open it. The last check runs after symlinks and
+    junctions are resolved. Both guards are written as a normalised value followed by an
+    inline startswith check on the same variable, the form static analysis (CodeQL
+    py/path-injection) recognises as a path sanitiser.
     """
     normalized = os.path.normpath(os.path.abspath(os.path.expanduser(str(value))))
-    if not _within(normalized, roots):
+    candidate = os.path.normpath(os.path.normcase(normalized))
+    for root in roots:
+        base = os.path.normcase(root)
+        if candidate.startswith(base) and candidate[len(base):len(base) + 1] in ("", os.sep):
+            _refuse_remote_links(candidate, base, value)
+            break
+    else:
         raise ServiceError("path_not_allowed", "Path is outside the folders integrations may use.", {"path": str(value)})
     resolved = os.path.realpath(normalized)
     for root in roots:
@@ -121,20 +165,86 @@ def ensure_allowed_path(value: str | Path, roots: Sequence[str]) -> Path:
     raise ServiceError("path_not_allowed", "Path resolves outside the folders integrations may use.", {"path": str(value)})
 
 
+def _final_path(stream: BinaryIO) -> str:
+    """Where an open file really is, read from its handle, so a swapped link cannot redirect it."""
+    if os.name != "nt":
+        return os.path.realpath(stream.name)
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_final_path = kernel32.GetFinalPathNameByHandleW
+    get_final_path.argtypes = (wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD)
+    get_final_path.restype = wintypes.DWORD
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = get_final_path(msvcrt.get_osfhandle(stream.fileno()), buffer, len(buffer), 0)
+    if not length or length >= len(buffer):
+        raise ctypes.WinError(ctypes.get_last_error())
+    final = buffer.value
+    if final.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + final[8:]
+    return final[4:] if final.startswith("\\\\?\\") else final
+
+
+@contextmanager
+def open_verified(path: Path, roots: Sequence[str]) -> Iterator[BinaryIO]:
+    """Open a checked file and confirm the handle still points inside the allowed roots.
+
+    Closes the gap between ensure_allowed_path and the converter opening the file: a junction
+    swapped in between is caught, and the converters read this handle instead of the path.
+    """
+    with open(path, "rb") as stream:
+        if not _within(_final_path(stream), roots):
+            raise ServiceError("path_not_allowed", "File moved outside the allowed folders after it was checked.", {"path": str(path)})
+        yield stream
+
+
+def integration_limits(config: dict | None = None) -> dict:
+    """Resource limits for integration requests: DEFAULT_LIMITS, overridden by config.json "integration_limits"."""
+    configured = (read_config() if config is None else config).get("integration_limits")
+    limits = dict(DEFAULT_LIMITS)
+    if isinstance(configured, dict):
+        for key in limits:
+            value = configured.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                limits[key] = value
+    return limits
+
+
+def _limit_error(limit: str, value: int) -> ServiceError:
+    return ServiceError("limit_exceeded", f"The request exceeds {limit} ({value}).", {"limit": limit, "value": value})
+
+
 def expand_inputs(
     inputs: Iterable[str | Path],
     recursive: bool = False,
     roots: Sequence[str] | None = None,
+    limits: dict | None = None,
 ) -> list[Path]:
-    """Turn files and folders into a de-duplicated list of files; folders yield supported files only."""
+    """Turn files and folders into a de-duplicated list of files; folders yield supported files only.
+
+    Folder scans do not enter linked folders and stop at max_scan_depth and max_files.
+    """
     roots = allowed_roots() if roots is None else roots
+    limits = integration_limits() if limits is None else limits
+    max_files = limits["max_files"]
     files: list[Path] = []
     seen: set[str] = set()
     missing: list[str] = []
     for value in inputs:
         path = ensure_allowed_path(value, roots)
         if path.is_dir():
-            candidates = collect_supported_files(path, recursive=recursive)
+            try:
+                candidates = scan_supported_files(
+                    path,
+                    recursive=recursive,
+                    max_depth=limits["max_scan_depth"],
+                    max_files=max_files - len(files) + 1,
+                )
+            except ScanLimitExceeded as error:
+                limit = error.limit
+                raise _limit_error(limit, limits[limit] if limit == "max_scan_depth" else max_files) from error
         elif path.is_file():
             candidates = [path]
         else:
@@ -147,6 +257,8 @@ def expand_inputs(
             if key not in seen:
                 seen.add(key)
                 files.append(candidate)
+            if len(files) > max_files:
+                raise _limit_error("max_files", max_files)
     if missing:
         raise ServiceError("not_found", "Some input paths do not exist.", {"paths": missing})
     if not files:
@@ -168,7 +280,10 @@ def classification_to_dict(classification: FileClassification) -> dict:
     }
 
 
-def file_result_to_dict(result: FileResult, include_content: bool = False) -> dict:
+def file_result_to_dict(result: FileResult, include_content: bool = False, content_budget: list[int] | None = None) -> dict:
+    """JSON form of a result. With include_content, Markdown is embedded while content_budget
+    (a one-item list of remaining bytes, shared across a response) allows; later files get
+    "markdown": null and "content_omitted": "limit_exceeded"."""
     reason_code, message = _reason(result.message) if result.status.value == "skipped" else ("", result.message)
     data = {
         "source": str(result.path),
@@ -180,7 +295,15 @@ def file_result_to_dict(result: FileResult, include_content: bool = False) -> di
     }
     if include_content:
         markdown = next((path for path in result.outputs if path.suffix.lower() == ".md"), None)
-        data["markdown"] = markdown.read_text(encoding="utf-8") if markdown else None
+        data["markdown"] = None
+        if markdown:
+            size = markdown.stat().st_size
+            if content_budget is not None and size > content_budget[0]:
+                data["content_omitted"] = "limit_exceeded"
+            else:
+                data["markdown"] = markdown.read_text(encoding="utf-8")
+                if content_budget is not None:
+                    content_budget[0] -= size
     return data
 
 
@@ -195,6 +318,7 @@ def get_info(paths: AppPaths) -> dict:
         "modes": [mode.value for mode in ProcessingMode],
         "default_ocr_languages": config.get("ocr_languages", []),
         "tesseract": find_tesseract(APP_DIR),
+        "limits": integration_limits(config),
         "data_dir": str(paths.data_dir),
         "markdown_dir": str(paths.markdown_dir),
         "ocr_pdf_dir": str(paths.ocr_pdf_dir),
@@ -219,7 +343,7 @@ def list_languages(paths: AppPaths) -> dict:
 
 
 def classify(inputs: Iterable[str | Path], recursive: bool = False, roots: Sequence[str] | None = None) -> dict:
-    files = expand_inputs(inputs, recursive=recursive, roots=roots)
+    files = expand_inputs(inputs, recursive=recursive, roots=roots, limits=integration_limits())
     return {"files": [classification_to_dict(classify_file(path)) for path in files]}
 
 
@@ -250,13 +374,14 @@ def convert(
     roots: Sequence[str] | None = None,
 ) -> dict:
     roots = allowed_roots() if roots is None else roots
+    limits = integration_limits()
     try:
         mode = ProcessingMode(mode)
     except ValueError as error:
         choices = ", ".join(item.value for item in ProcessingMode)
         raise ServiceError("invalid_mode", f"Unknown mode {mode!r}. Use one of: {choices}.") from error
 
-    files = expand_inputs(inputs, recursive=recursive, roots=roots)
+    files = expand_inputs(inputs, recursive=recursive, roots=roots, limits=limits)
     languages = list(languages) if languages else list(read_config().get("ocr_languages", []))
     classifications = tuple(classify_file(path) for path in files)
 
@@ -275,7 +400,10 @@ def convert(
     else:
         markdown_dir, ocr_pdf_dir = paths.markdown_dir, paths.ocr_pdf_dir
 
-    with _batch_lock:
+    # One long batch must not block other callers forever.
+    if not _batch_lock.acquire(timeout=limits["batch_wait_seconds"]):
+        raise ServiceError("busy", "Another batch is still running. Try again later.", {"waited_seconds": limits["batch_wait_seconds"]})
+    try:
         logging.getLogger(__name__).info("Integration batch: mode=%s files=%d", mode.value, len(files))
         result = process_batch(
             files,
@@ -288,9 +416,13 @@ def convert(
             progress_callback=progress_callback,
             classifications=classifications,
             data_dir=paths.data_dir,
+            open_source=lambda path: open_verified(path, roots),
         )
+    finally:
+        _batch_lock.release()
 
-    items = [file_result_to_dict(item, include_content) for item in result.files]
+    budget = [limits["max_content_bytes"]]
+    items = [file_result_to_dict(item, include_content, budget) for item in result.files]
     return {
         "schema_version": SCHEMA_VERSION,
         "mode": mode.value,
