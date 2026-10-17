@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/hungnp1999/MarkitdownTool/main/schemas/info.schema.json",
+  "title": "MarkitdownTool info",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "schema_version",
+    "supported_extensions",
+    "modes",
+    "limits",
+    "data_dir",
+    "markdown_dir",
+    "ocr_pdf_dir",
+    "log_dir"
+  ],
+  "properties": {
+    "name": {
+      "const": "MarkitdownTool"
+    },
+    "version": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1$",
+      "description": "Major contract version. New fields and codes may appear without a change."
+    },
+    "repository": {
+      "type": "string"
+    },
+    "supported_extensions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "modes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "default_ocr_languages": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tesseract": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "max_files",
+        "max_scan_depth",
+        "max_content_bytes",
+        "batch_wait_seconds"
+      ],
+      "properties": {
+        "max_files": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_scan_depth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_content_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "batch_wait_seconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "data_dir": {
+      "type": "string"
+    },
+    "markdown_dir": {
+      "type": "string"
+    },
+    "ocr_pdf_dir": {
+      "type": "string"
+    },
+    "log_dir": {
+      "type": "string"
+    }
+  }
+}

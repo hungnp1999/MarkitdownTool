@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/hungnp1999/MarkitdownTool/main/schemas/manifest.schema.json",
+  "title": "MarkitdownTool manifest",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "schema_version",
+    "interfaces",
+    "formats",
+    "modes",
+    "ocr",
+    "engines",
+    "reason_codes",
+    "limits",
+    "schemas"
+  ],
+  "properties": {
+    "name": {
+      "const": "MarkitdownTool"
+    },
+    "version": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1$",
+      "description": "Major contract version. New fields and codes may appear without a change."
+    },
+    "repository": {
+      "type": "string"
+    },
+    "interfaces": {
+      "type": "object",
+      "required": [
+        "cli",
+        "api",
+        "mcp"
+      ],
+      "properties": {
+        "cli": {
+          "type": "object",
+          "required": [
+            "command",
+            "json_flag",
+            "exit_codes"
+          ],
+          "properties": {
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "json_flag": {
+              "type": "string"
+            },
+            "exit_codes": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "api": {
+          "type": "object",
+          "required": [
+            "base_path",
+            "auth",
+            "default_port",
+            "endpoints"
+          ],
+          "properties": {
+            "base_path": {
+              "type": "string"
+            },
+            "auth": {
+              "type": "string"
+            },
+            "default_port": {
+              "type": "integer"
+            },
+            "endpoints": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "mcp": {
+          "type": "object",
+          "required": [
+            "transport",
+            "command",
+            "tools"
+          ],
+          "properties": {
+            "transport": {
+              "type": "string"
+            },
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "formats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "extension",
+          "markdown",
+          "ocr"
+        ],
+        "properties": {
+          "extension": {
+            "type": "string"
+          },
+          "markdown": {
+            "type": "boolean"
+          },
+          "ocr": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "modes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ocr": {
+      "type": "object",
+      "required": [
+        "available",
+        "engine",
+        "languages",
+        "default_languages"
+      ],
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "engine": {
+          "type": "string"
+        },
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "default_languages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "engines": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "max_files",
+        "max_scan_depth",
+        "max_content_bytes",
+        "batch_wait_seconds"
+      ],
+      "properties": {
+        "max_files": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_scan_depth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_content_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "batch_wait_seconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "schemas": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "format": "uri"
+      }
+    }
+  }
+}

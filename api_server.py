@@ -2,6 +2,7 @@
 
 Endpoints (all JSON):
   GET  /v1/health       liveness check, no token needed
+  GET  /v1/manifest     capabilities: interfaces, formats, OCR languages, engine versions
   GET  /v1/info         version, OCR runtime, data folders
   GET  /v1/languages    installed OCR languages
   POST /v1/classify     {"paths": [...], "recursive": false}
@@ -34,7 +35,7 @@ from pathlib import Path
 from app_paths import AppPaths
 from app_runtime import API_TOKEN_FILE, APP_VERSION, load_or_create_api_token
 from document_core import SUPPORTED_EXTENSIONS
-from integration_service import ServiceError, allowed_roots, classify, convert, get_info, list_languages
+from integration_service import ServiceError, allowed_roots, classify, convert, get_info, get_manifest, list_languages
 
 
 TOKEN_ENV = "MARKITDOWNTOOL_API_TOKEN"
@@ -194,6 +195,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
 
         routes = {
+            ("GET", "/v1/manifest"): lambda: get_manifest(self.app_paths),
             ("GET", "/v1/info"): lambda: get_info(self.app_paths),
             ("GET", "/v1/languages"): lambda: list_languages(self.app_paths),
             ("POST", "/v1/classify"): self._classify,

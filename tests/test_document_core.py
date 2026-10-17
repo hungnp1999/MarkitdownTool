@@ -16,7 +16,7 @@ from document_core import (
     ScanLimitExceeded,
     classify_file,
     process_batch,
-    scan_supported_files,
+    scan_folder,
 )
 
 
@@ -217,23 +217,41 @@ class ScanTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def names(self, **options):
-        return [path.name for path in scan_supported_files(self.root, **options)]
+        return [path.name for path in scan_folder(self.root, **options)]
 
     def test_matches_collect_supported_files(self):
         self.assertEqual(self.names(), ["a.pdf"])
         self.assertEqual(self.names(recursive=True), ["a.pdf", "b.docx", "c.xlsx"])
 
+    def test_unsupported_files_are_listed_without_hidden_and_lock_files(self):
+        (self.root / ".cache").mkdir()
+        for name in (".cache/x.bin", ".cache/hidden.pdf", ".env", "one/photo.png"):
+            (self.root / name).write_bytes(b"x")
+        self.assertEqual(
+            self.names(recursive=True, include_unsupported=True),
+            ["hidden.pdf", "a.pdf", "notes.txt", "b.docx", "photo.png", "c.xlsx"],
+        )
+
+    @unittest.skipUnless(os.name == "nt", "hidden attribute is Windows-only")
+    def test_hidden_and_system_files_are_not_listed(self):
+        import ctypes
+
+        for name, attribute in (("Thumbs.db", 0x2), ("desktop.ini", 0x4)):
+            (self.root / name).write_bytes(b"x")
+            ctypes.windll.kernel32.SetFileAttributesW(str(self.root / name), attribute)
+        self.assertEqual(self.names(include_unsupported=True), ["a.pdf", "notes.txt"])
+
     def test_depth_limit(self):
         self.assertEqual(self.names(recursive=True, max_depth=2), ["a.pdf", "b.docx", "c.xlsx"])
         self.assertEqual(self.names(max_depth=0), ["a.pdf"])
         with self.assertRaises(ScanLimitExceeded) as raised:
-            scan_supported_files(self.root, recursive=True, max_depth=1)
+            scan_folder(self.root, recursive=True, max_depth=1)
         self.assertEqual((raised.exception.limit, raised.exception.value), ("max_scan_depth", 1))
 
     def test_file_limit_stops_the_scan(self):
         self.assertEqual(len(self.names(recursive=True, max_files=3)), 3)
         with self.assertRaises(ScanLimitExceeded) as raised:
-            scan_supported_files(self.root, recursive=True, max_files=2)
+            scan_folder(self.root, recursive=True, max_files=2)
         self.assertEqual(raised.exception.limit, "max_files")
 
     @unittest.skipUnless(os.name == "nt", "junctions are Windows-only")

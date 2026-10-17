@@ -4,9 +4,13 @@ Every function returns plain JSON-serialisable data so each protocol adapter onl
 handles transport concerns (argument parsing, HTTP, MCP tool schemas).
 """
 
+import functools
+import hashlib
+import importlib
 import logging
 import os
 import string
+import subprocess
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,7 +18,7 @@ from threading import Event
 from typing import BinaryIO, Callable, Iterable, Iterator, Sequence
 
 from app_paths import AppPaths
-from app_runtime import APP_DIR, APP_VERSION, GITHUB_REPOSITORY, read_config
+from app_runtime import APP_DIR, APP_VERSION, GITHUB_REPOSITORY, cli_command, read_config
 from document_core import (
     SUPPORTED_EXTENSIONS,
     FileClassification,
@@ -26,11 +30,24 @@ from document_core import (
     find_tesseract,
     get_available_languages,
     process_batch,
-    scan_supported_files,
+    scan_folder,
 )
 
 
+# Major version of the JSON contract in schemas/. Adding fields or codes keeps it; removing or
+# changing the meaning of a field bumps it.
 SCHEMA_VERSION = "1"
+SCHEMA_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/schemas"
+SCHEMA_NAMES = ("manifest", "info", "classify", "convert", "error")
+API_ENDPOINTS = (
+    ("GET", "/v1/health"),
+    ("GET", "/v1/manifest"),
+    ("GET", "/v1/info"),
+    ("GET", "/v1/languages"),
+    ("POST", "/v1/classify"),
+    ("POST", "/v1/convert"),
+)
+MCP_TOOLS = ("convert_documents", "classify_documents", "list_ocr_languages", "get_tool_info", "get_manifest")
 ALLOWED_ROOTS_ENV = "MARKITDOWNTOOL_ALLOWED_ROOTS"
 _ALLOWED_DRIVE_TYPES = {2, 3, 5, 6}  # removable, fixed, CD-ROM, RAM disk; excludes network (4)
 DEFAULT_LIMITS = {
@@ -200,6 +217,29 @@ def open_verified(path: Path, roots: Sequence[str]) -> Iterator[BinaryIO]:
         yield stream
 
 
+def _digest(stream: BinaryIO) -> dict:
+    digest = hashlib.file_digest(stream, "sha256")
+    size = stream.tell()
+    stream.seek(0)
+    return {"size": size, "sha256": digest.hexdigest()}
+
+
+def source_digest(path: Path, roots: Sequence[str]) -> dict:
+    """Size and SHA-256 of a checked file, or nulls when it cannot be read."""
+    try:
+        with open_verified(path, roots) as stream:
+            return _digest(stream)
+    except (OSError, ServiceError):
+        return {"size": None, "sha256": None}
+
+
+@contextmanager
+def _open_and_digest(path: Path, roots: Sequence[str], digests: dict[str, dict]) -> Iterator[BinaryIO]:
+    with open_verified(path, roots) as stream:
+        digests[str(path)] = _digest(stream)
+        yield stream
+
+
 def integration_limits(config: dict | None = None) -> dict:
     """Resource limits for integration requests: DEFAULT_LIMITS, overridden by config.json "integration_limits"."""
     configured = (read_config() if config is None else config).get("integration_limits")
@@ -222,9 +262,11 @@ def expand_inputs(
     roots: Sequence[str] | None = None,
     limits: dict | None = None,
 ) -> list[Path]:
-    """Turn files and folders into a de-duplicated list of files; folders yield supported files only.
+    """Turn files and folders into a de-duplicated list of files.
 
-    Folder scans do not enter linked folders and stop at max_scan_depth and max_files.
+    Folders yield every file, including unsupported ones, so callers can report them; hidden and
+    system files and Office lock files are left out. Folder scans do not enter linked folders
+    and stop at max_scan_depth and max_files.
     """
     roots = allowed_roots() if roots is None else roots
     limits = integration_limits() if limits is None else limits
@@ -236,11 +278,12 @@ def expand_inputs(
         path = ensure_allowed_path(value, roots)
         if path.is_dir():
             try:
-                candidates = scan_supported_files(
+                candidates = scan_folder(
                     path,
                     recursive=recursive,
                     max_depth=limits["max_scan_depth"],
                     max_files=max_files - len(files) + 1,
+                    include_unsupported=True,
                 )
             except ScanLimitExceeded as error:
                 limit = error.limit
@@ -307,6 +350,77 @@ def file_result_to_dict(result: FileResult, include_content: bool = False, conte
     return data
 
 
+def _package_version(name: str) -> str | None:
+    from importlib import metadata
+
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        try:
+            return getattr(importlib.import_module(name), "__version__", None)
+        except ImportError:
+            return None
+
+
+@functools.lru_cache(maxsize=4)
+def _tesseract_version(executable: str | None) -> str | None:
+    if not executable:
+        return None
+    try:
+        completed = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    first_line = (completed.stdout or completed.stderr).strip().splitlines()[:1]
+    return first_line[0].split()[-1].lstrip("v") if first_line else None
+
+
+def get_manifest(paths: AppPaths) -> dict:
+    """What this installation can do, for consumers to check before calling it."""
+    config = read_config()
+    tesseract = find_tesseract(APP_DIR)
+    try:
+        languages = sorted(get_available_languages(APP_DIR, paths.data_dir))
+    except Exception:
+        languages = []
+    return {
+        "name": "MarkitdownTool",
+        "version": APP_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "repository": f"https://github.com/{GITHUB_REPOSITORY}",
+        "interfaces": {
+            "cli": {"command": cli_command(), "json_flag": "--json", "exit_codes": {"0": "ok", "1": "file_failures", "2": "request_error"}},
+            "api": {"base_path": "/v1", "auth": "bearer", "default_port": 8765, "endpoints": [f"{method} {path}" for method, path in API_ENDPOINTS]},
+            "mcp": {"transport": "stdio", "command": cli_command("mcp"), "tools": list(MCP_TOOLS)},
+        },
+        "formats": [
+            {"extension": extension, "markdown": True, "ocr": extension == ".pdf"}
+            for extension in sorted(SUPPORTED_EXTENSIONS)
+        ],
+        "modes": [mode.value for mode in ProcessingMode],
+        "ocr": {
+            "available": bool(tesseract and languages),
+            "engine": "tesseract",
+            "languages": languages,
+            "default_languages": config.get("ocr_languages", []),
+        },
+        "engines": {
+            "markitdown": _package_version("markitdown"),
+            "ocrmypdf": _package_version("ocrmypdf"),
+            "pypdfium2": _package_version("pypdfium2"),
+            "tesseract": _tesseract_version(tesseract),
+        },
+        "reason_codes": sorted({code for code, _message in _REASON_CODES.values()}),
+        "limits": integration_limits(config),
+        "schemas": {name: f"{SCHEMA_BASE_URL}/{name}.schema.json" for name in SCHEMA_NAMES},
+    }
+
+
 def get_info(paths: AppPaths) -> dict:
     config = read_config()
     return {
@@ -343,8 +457,12 @@ def list_languages(paths: AppPaths) -> dict:
 
 
 def classify(inputs: Iterable[str | Path], recursive: bool = False, roots: Sequence[str] | None = None) -> dict:
+    roots = allowed_roots() if roots is None else roots
     files = expand_inputs(inputs, recursive=recursive, roots=roots, limits=integration_limits())
-    return {"files": [classification_to_dict(classify_file(path)) for path in files]}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "files": [{**classification_to_dict(classify_file(path)), **source_digest(path, roots)} for path in files],
+    }
 
 
 def _check_ocr_ready(languages: list[str], paths: AppPaths) -> None:
@@ -400,6 +518,7 @@ def convert(
     else:
         markdown_dir, ocr_pdf_dir = paths.markdown_dir, paths.ocr_pdf_dir
 
+    digests: dict[str, dict] = {}
     # One long batch must not block other callers forever.
     if not _batch_lock.acquire(timeout=limits["batch_wait_seconds"]):
         raise ServiceError("busy", "Another batch is still running. Try again later.", {"waited_seconds": limits["batch_wait_seconds"]})
@@ -416,13 +535,18 @@ def convert(
             progress_callback=progress_callback,
             classifications=classifications,
             data_dir=paths.data_dir,
-            open_source=lambda path: open_verified(path, roots),
+            open_source=lambda path: _open_and_digest(path, roots, digests),
         )
     finally:
         _batch_lock.release()
 
     budget = [limits["max_content_bytes"]]
-    items = [file_result_to_dict(item, include_content, budget) for item in result.files]
+    items = []
+    for item in result.files:
+        data = file_result_to_dict(item, include_content, budget)
+        # Hash what the converter read; files that were skipped were never opened.
+        data.update(digests.get(str(item.path)) or source_digest(item.path, roots))
+        items.append(data)
     return {
         "schema_version": SCHEMA_VERSION,
         "mode": mode.value,
