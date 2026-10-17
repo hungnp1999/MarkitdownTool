@@ -4,6 +4,17 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ## [Unreleased]
 
+### Added
+
+- `markitdowntool manifest`, `GET /v1/manifest`, and the MCP tool `get_manifest` describe the installation's capabilities: interfaces, supported formats, modes, installed OCR languages, engine versions (MarkItDown, OCRmyPDF, pypdfium2, Tesseract), limits, and schema URLs.
+- JSON Schemas for the `manifest`, `info`, `classify`, `convert`, and `error` outputs in `schemas/`, with a compatibility rule for `schema_version`.
+- `classify` and `convert` results include the source file's `size` and `sha256`.
+- `classify` results include `schema_version`.
+
+### Changed
+
+- Folder inputs in the CLI, API, and MCP server now list unsupported files too (`supported: false`, or skipped with `reason_code: unsupported_format`) instead of dropping them. Hidden and system files, Office lock files, and unsupported files inside hidden folders are still left out. A folder with only unsupported files is no longer a `no_input_files` error.
+
 ### Security
 
 - Integrations now read junctions and symlinks along a path without following them and refuse links to network shares or devices before `realpath` opens them, so a link inside an allowed folder can no longer make Windows contact a remote host (#6).

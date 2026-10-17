@@ -9,13 +9,14 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from app_paths import AppPaths
 from app_runtime import APP_VERSION
-from integration_service import ServiceError, allowed_roots, classify, convert, get_info, list_languages
+from integration_service import ServiceError, allowed_roots, classify, convert, get_info, get_manifest, list_languages
 
 
 INSTRUCTIONS = (
     "MarkitdownTool converts local PDF, DOCX, PPTX, and XLSX files to Markdown and can OCR scanned PDFs "
     "with Tesseract. Paths must be absolute paths on local drives of the machine running this server; network shares are refused. Use classify_documents "
-    "to check files first, convert_documents to process them, and list_ocr_languages before choosing OCR languages."
+    "to check files first, convert_documents to process them, list_ocr_languages before choosing OCR languages, "
+    "and get_manifest to check capabilities and versions."
 )
 
 
@@ -77,6 +78,11 @@ def build_server(paths: AppPaths) -> MCPServer:
     def get_tool_info() -> dict[str, Any]:
         """Show the MarkitdownTool version, supported formats, OCR runtime, and output folders."""
         return call(get_info, paths)
+
+    @server.tool(name="get_manifest", structured_output=True)
+    def manifest_tool() -> dict[str, Any]:
+        """Describe capabilities: interfaces, supported formats, modes, OCR languages, engine versions, limits, schemas."""
+        return call(get_manifest, paths)
 
     return server
 

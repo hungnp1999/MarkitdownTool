@@ -1,5 +1,6 @@
 import base64
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -71,12 +72,16 @@ class ExpandInputsTests(TempTree):
         self.assertEqual(raised.exception.code, "not_found")
         self.assertEqual(raised.exception.details["paths"], [str(self.root / "nope.pdf")])
 
-    def test_folder_without_supported_files_is_an_error(self):
+    def test_folder_with_only_unsupported_files_lists_them(self):
         images = self.root / "images"
         images.mkdir()
         (images / "photo.png").write_bytes(b"x")
+        self.assertEqual([path.name for path in expand_inputs([images], recursive=True)], ["photo.png"])
+
+    def test_empty_folder_is_an_error(self):
+        (self.root / "empty").mkdir()
         with self.assertRaises(ServiceError) as raised:
-            expand_inputs([images], recursive=True)
+            expand_inputs([self.root / "empty"], recursive=True)
         self.assertEqual(raised.exception.code, "no_input_files")
 
 
@@ -96,7 +101,7 @@ class PathPolicyTests(TempTree):
 
     def test_configured_roots_narrow_access_without_prefix_confusion(self):
         roots = self.roots(self.root / "sub")
-        self.assertEqual([path.name for path in expand_inputs([self.root / "sub"], roots=roots)], ["c.xlsx"])
+        self.assertEqual([path.name for path in expand_inputs([self.root / "sub"], roots=roots)], ["c.xlsx", "d.png"])
         for value in (self.root / "a.pdf", str(self.root / "sub") + "2", self.root / "sub" / ".." / "a.pdf"):
             with self.subTest(value=value), self.assertRaises(ServiceError) as raised:
                 expand_inputs([value], roots=roots)
@@ -190,7 +195,7 @@ class LimitTests(TempTree):
         self.assertEqual(integration_service.integration_limits({"integration_limits": []}), self.limits())
 
     def test_too_many_files_is_a_limit_error(self):
-        self.assertEqual(len(expand_inputs([self.root], limits=self.limits(max_files=2))), 2)
+        self.assertEqual(len(expand_inputs([self.root], limits=self.limits(max_files=3))), 3)
         for inputs in ([self.root], [self.root / "a.pdf", self.root / "b.DOCX", self.root / "notes.txt"]):
             with self.subTest(inputs=inputs), self.assertRaises(ServiceError) as raised:
                 expand_inputs(inputs, recursive=True, limits=self.limits(max_files=2))
@@ -198,7 +203,7 @@ class LimitTests(TempTree):
             self.assertEqual(raised.exception.details, {"limit": "max_files", "value": 2})
 
     def test_deep_folders_are_a_limit_error(self):
-        self.assertEqual(expand_inputs([self.root], recursive=True, limits=self.limits(max_scan_depth=1))[-1].name, "c.xlsx")
+        self.assertIn("c.xlsx", [path.name for path in expand_inputs([self.root], recursive=True, limits=self.limits(max_scan_depth=1))])
         (self.root / "sub" / "deeper").mkdir()
         with self.assertRaises(ServiceError) as raised:
             expand_inputs([self.root], recursive=True, limits=self.limits(max_scan_depth=1))
@@ -477,6 +482,15 @@ class ApiTests(TempTree):
         status, body = self.request("POST", "/v1/classify", {"paths": ["\\\\evil\\share\\a.pdf"]})
         self.assertEqual((status, body["error"]["code"]), (403, "path_not_allowed"))
 
+    def test_manifest_endpoints_all_exist(self):
+        status, manifest = self.request("GET", "/v1/manifest")
+        self.assertEqual(status, 200)
+        for endpoint in manifest["interfaces"]["api"]["endpoints"]:
+            method, path = endpoint.split()
+            with self.subTest(endpoint=endpoint):
+                status, body = self.request(method, path, {} if method == "POST" else None)
+                self.assertNotIn(body.get("error", {}).get("code"), ("not_found", "method_not_allowed"))
+
     def test_limit_errors_are_413(self):
         limits = {**integration_service.DEFAULT_LIMITS, "max_files": 1}
         with patch.object(integration_service, "integration_limits", return_value=limits):
@@ -504,6 +518,66 @@ class ApiBindingTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "token_required")
 
 
+class ContractTests(TempTree):
+    """Outputs must match the published JSON Schemas in schemas/."""
+
+    def validate(self, name, data):
+        import jsonschema
+
+        schema = json.loads((Path(__file__).parent.parent / "schemas" / f"{name}.schema.json").read_text(encoding="utf-8"))
+        jsonschema.Draft202012Validator.check_schema(schema)
+        jsonschema.validate(json.loads(json.dumps(data)), schema, cls=jsonschema.Draft202012Validator)
+
+    def test_manifest_and_info_match_their_schemas(self):
+        manifest = integration_service.get_manifest(self.paths)
+        self.validate("manifest", manifest)
+        self.validate("info", integration_service.get_info(self.paths))
+        self.assertEqual(set(manifest["schemas"]), set(integration_service.SCHEMA_NAMES))
+        self.assertEqual(manifest["formats"][0]["extension"], ".docx")
+
+    def test_classify_lists_unsupported_files_with_digests(self):
+        result = integration_service.classify([self.root], recursive=True)
+        self.validate("classify", result)
+        by_name = {Path(item["path"]).name: item for item in result["files"]}
+        self.assertEqual(sorted(by_name), ["a.pdf", "b.DOCX", "c.xlsx", "d.png", "notes.txt"])
+        self.assertEqual((by_name["d.png"]["supported"], by_name["d.png"]["reason_code"]), (False, "unsupported_format"))
+        self.assertEqual(by_name["notes.txt"]["size"], 1)
+        self.assertEqual(by_name["notes.txt"]["sha256"], hashlib.sha256(b"x").hexdigest())
+
+    def test_convert_reports_unsupported_files_as_skipped_with_digests(self):
+        def fake_batch(files, *args, open_source=None, **kwargs):
+            with open_source(files[0]) as stream:
+                stream.read()
+            return BatchResult(tuple(
+                FileResult(path, FileStatus.SUCCESS, "Markdown") if index == 0
+                else FileResult(path, FileStatus.SKIPPED, "Bỏ qua", message="Định dạng này chưa được hỗ trợ.")
+                for index, path in enumerate(files)
+            ))
+
+        with patch.object(integration_service, "process_batch", side_effect=fake_batch):
+            result = convert([self.root / "sub"], self.paths, mode="markdown")
+        self.validate("convert", result)
+        converted, skipped = result["files"]
+        self.assertEqual(Path(skipped["source"]).name, "d.png")
+        self.assertEqual(skipped["reason_code"], "unsupported_format")
+        for item in (converted, skipped):
+            self.assertEqual((item["size"], item["sha256"]), (1, hashlib.sha256(b"x").hexdigest()))
+
+    def test_unreadable_source_has_null_digest(self):
+        self.assertEqual(integration_service.source_digest(self.root / "gone.pdf", integration_service.allowed_roots()), {"size": None, "sha256": None})
+
+    def test_errors_match_their_schema(self):
+        self.validate("error", {"error": ServiceError("limit_exceeded", "Too many.", {"limit": "max_files"}).to_dict()})
+
+    def test_cli_manifest_prints_json(self):
+        from markitdown_cli import main
+
+        stdout = io.StringIO()
+        with patch("app_runtime.prepare_runtime", return_value=self.paths), contextlib.redirect_stdout(stdout):
+            self.assertEqual(main(["manifest"]), 0)
+        self.validate("manifest", json.loads(stdout.getvalue()))
+
+
 class McpTests(TempTree):
     def test_registers_tools_and_maps_service_errors(self):
         import asyncio
@@ -514,7 +588,7 @@ class McpTests(TempTree):
         tools = asyncio.run(server.list_tools())
         self.assertEqual(
             sorted(tool.name for tool in tools),
-            ["classify_documents", "convert_documents", "get_tool_info", "list_ocr_languages"],
+            sorted(integration_service.MCP_TOOLS),
         )
         convert_tool = next(tool for tool in tools if tool.name == "convert_documents")
         self.assertEqual(convert_tool.input_schema["required"], ["paths_or_folders"])

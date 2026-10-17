@@ -2,6 +2,7 @@ import hashlib
 import logging
 import os
 import shutil
+import stat
 import subprocess
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
@@ -155,37 +156,53 @@ def collect_supported_files(folder: str | Path, recursive: bool = False) -> list
     )
 
 
-def scan_supported_files(
+def _is_hidden(entry: os.DirEntry) -> bool:
+    if entry.name.startswith((".", "~$")):
+        return True
+    attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+    return bool(attributes & (stat.FILE_ATTRIBUTE_HIDDEN | stat.FILE_ATTRIBUTE_SYSTEM))
+
+
+def scan_folder(
     folder: str | Path,
     recursive: bool = False,
     max_depth: int | None = None,
     max_files: int | None = None,
+    include_unsupported: bool = False,
 ) -> list[Path]:
     """Like collect_supported_files, but never follows junctions or symlinks and stops at the limits.
 
     A linked folder is not entered, because its target may be a network share. A linked file is
     returned without being opened, so the caller can check where it points first.
+    include_unsupported also returns files of other types, so callers can report them instead of
+    dropping them; hidden and system files, Office lock files (~$), and anything inside hidden
+    folders are still left out unless they are supported documents.
     """
     root = Path(folder)
     if not root.is_dir():
         raise NotADirectoryError(f"Not a folder: {root}")
     found: list[Path] = []
 
-    def walk(directory: Path, depth: int) -> Iterator[Path]:
+    def wanted(entry: os.DirEntry, hidden_folder: bool) -> bool:
+        if _is_document_name(entry.name):
+            return True
+        return include_unsupported and not hidden_folder and not _is_hidden(entry)
+
+    def walk(directory: Path, depth: int, hidden_folder: bool) -> Iterator[Path]:
         with os.scandir(directory) as entries:
             for entry in entries:
                 if entry.is_symlink() or entry.is_junction():
-                    if _is_document_name(entry.name) and not entry.is_junction():
+                    if not entry.is_junction() and wanted(entry, hidden_folder):
                         yield Path(entry.path)
                 elif entry.is_dir(follow_symlinks=False):
                     if recursive:
                         if max_depth is not None and depth >= max_depth:
                             raise ScanLimitExceeded("max_scan_depth", max_depth)
-                        yield from walk(Path(entry.path), depth + 1)
-                elif entry.is_file(follow_symlinks=False) and _is_document_name(entry.name):
+                        yield from walk(Path(entry.path), depth + 1, hidden_folder or _is_hidden(entry))
+                elif entry.is_file(follow_symlinks=False) and wanted(entry, hidden_folder):
                     yield Path(entry.path)
 
-    for path in walk(root, 0):
+    for path in walk(root, 0, False):
         if max_files is not None and len(found) >= max_files:
             raise ScanLimitExceeded("max_files", max_files)
         found.append(path)

@@ -65,11 +65,14 @@ markitdowntool convert scan.pdf report.docx --mode ocr_markdown --lang vie+eng -
 markitdowntool classify "D:\Docs" --recursive
 markitdowntool languages
 markitdowntool info --json
+markitdowntool manifest
 ```
 
 - `--mode`: `ocr` (searchable PDF only), `markdown` (no OCR), or `ocr_markdown` (default).
 - `--json` prints a machine-readable result; add `--include-content` to embed the Markdown text.
 - `--output-dir` must be absolute; results go to its `markdown\` and `ocrpdf\` subfolders.
+- `manifest` prints the installation's capabilities as JSON: interfaces, supported formats, modes, installed OCR languages, engine versions, limits, and schema URLs.
+- Folder inputs list every file, including unsupported ones (reported as `supported: false` / skipped with `reason_code: unsupported_format`), so nothing disappears from the result. Hidden and system files, Office lock files (`~$...`), and unsupported files inside hidden folders are left out.
 - Exit codes: `0` success (skipped files are not failures), `1` at least one file failed or the batch was cancelled, `2` the request could not run (missing path, OCR runtime, or language).
 
 ### HTTP API
@@ -81,6 +84,7 @@ markitdowntool api --port 8765
 | Method | Endpoint | Body |
 | --- | --- | --- |
 | GET | `/v1/health` | — (no token required) |
+| GET | `/v1/manifest` | — |
 | GET | `/v1/info` | — |
 | GET | `/v1/languages` | — |
 | POST | `/v1/classify` | `{"paths": ["D:\Docs"], "recursive": true}` |
@@ -92,7 +96,7 @@ The server binds to `127.0.0.1` by default. Every endpoint except `/v1/health` r
 
 ### MCP
 
-`markitdowntool mcp` runs a Model Context Protocol server over stdio with the tools `convert_documents`, `classify_documents`, `list_ocr_languages`, and `get_tool_info`. Add it to an MCP host configuration, for example:
+`markitdowntool mcp` runs a Model Context Protocol server over stdio with the tools `convert_documents`, `classify_documents`, `list_ocr_languages`, `get_tool_info`, and `get_manifest`. Add it to an MCP host configuration, for example:
 
 ```json
 {
@@ -106,6 +110,13 @@ The server binds to `127.0.0.1` by default. Every endpoint except `/v1/health` r
 ```
 
 `convert_documents` returns the Markdown text by default (`include_content: true`), so agents can use the result directly.
+
+### JSON contract
+
+The JSON results of all three interfaces are described by JSON Schemas (draft 2020-12) in [`schemas/`](schemas): `manifest`, `info`, `classify`, `convert`, and `error`. `manifest` lists their URLs.
+
+- `schema_version` is the contract's major version, currently `"1"`. New fields, reason codes, and error codes can be added within a major version, so consumers should ignore fields they do not know. Removing a field or changing its meaning raises the major version.
+- Every `classify` and `convert` file result carries the source file's `size` (bytes) and `sha256`, or `null` for both if the file could not be read. In `convert`, the hash is computed from the same opened file the converter read.
 
 ### Allowed folders
 

@@ -68,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
     languages = commands.add_parser("languages", help="List installed OCR languages.")
     languages.add_argument("--json", action="store_true", help="Print a machine-readable JSON result.")
 
+    manifest = commands.add_parser("manifest", help="Print capabilities as JSON (formats, modes, OCR languages, engines).")
+    manifest.add_argument("--json", action="store_true", help="Accepted for consistency; the manifest is always JSON.")
+
     info = commands.add_parser("info", help="Show version, OCR runtime, and data folders.")
     info.add_argument("--json", action="store_true", help="Print a machine-readable JSON result.")
 
@@ -137,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     from app_runtime import prepare_runtime
-    from integration_service import ServiceError, get_info, list_languages
+    from integration_service import ServiceError, get_info, get_manifest, list_languages
 
     paths = prepare_runtime(args.command)
 
@@ -157,6 +160,9 @@ def main(argv: list[str] | None = None) -> int:
             return _run_convert(args, paths)
         if args.command == "classify":
             return _run_classify(args)
+        if args.command == "manifest":
+            _print_json(get_manifest(paths))
+            return EXIT_OK
         result = get_info(paths) if args.command == "info" else list_languages(paths)
     except ServiceError as error:
         _print_error(error, as_json)

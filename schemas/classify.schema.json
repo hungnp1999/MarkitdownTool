@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/hungnp1999/MarkitdownTool/main/schemas/classify.schema.json",
+  "title": "MarkitdownTool classify result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1$",
+      "description": "Major contract version. New fields and codes may appear without a change."
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "extension",
+          "supported",
+          "needs_ocr",
+          "markdown_eligible",
+          "ocr_eligible",
+          "reason_code",
+          "reason",
+          "size",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "extension": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "needs_ocr": {
+            "type": "boolean"
+          },
+          "markdown_eligible": {
+            "type": "boolean"
+          },
+          "ocr_eligible": {
+            "type": "boolean"
+          },
+          "reason_code": {
+            "type": "string",
+            "description": "Empty, or a stable code such as unsupported_format, needs_ocr, not_eligible_for_mode. New codes may be added."
+          },
+          "reason": {
+            "type": "string"
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Source file size in bytes; null if the file could not be read."
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the source file; null if the file could not be read."
+          }
+        }
+      }
+    }
+  }
+}

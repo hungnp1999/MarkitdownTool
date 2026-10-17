@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/hungnp1999/MarkitdownTool/main/schemas/convert.schema.json",
+  "title": "MarkitdownTool convert result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "mode",
+    "languages",
+    "cancelled",
+    "summary",
+    "output_dirs",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1$",
+      "description": "Major contract version. New fields and codes may appear without a change."
+    },
+    "mode": {
+      "enum": [
+        "ocr",
+        "markdown",
+        "ocr_markdown"
+      ]
+    },
+    "languages": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cancelled": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "total",
+        "succeeded",
+        "skipped",
+        "failed"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "succeeded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "output_dirs": {
+      "type": "object",
+      "required": [
+        "markdown",
+        "ocr_pdf"
+      ],
+      "properties": {
+        "markdown": {
+          "type": "string"
+        },
+        "ocr_pdf": {
+          "type": "string"
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "status",
+          "stage",
+          "outputs",
+          "reason_code",
+          "message",
+          "size",
+          "sha256"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Absolute path, or the upload's file name when uploaded is true."
+          },
+          "uploaded": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "success",
+              "skipped",
+              "failed"
+            ]
+          },
+          "stage": {
+            "type": "string",
+            "description": "markdown, ocr, ocr_markdown, skipped or error."
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason_code": {
+            "type": "string",
+            "description": "Empty, or a stable code such as unsupported_format, needs_ocr, not_eligible_for_mode. New codes may be added."
+          },
+          "message": {
+            "type": "string"
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Source file size in bytes; null if the file could not be read."
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the source file; null if the file could not be read."
+          },
+          "markdown": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present only with include_content."
+          },
+          "content_omitted": {
+            "type": "string",
+            "description": "limit_exceeded when max_content_bytes left the Markdown out."
+          }
+        }
+      }
+    }
+  }
+}
