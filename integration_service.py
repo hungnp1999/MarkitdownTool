@@ -32,6 +32,7 @@ from document_core import (
     find_tesseract,
     force_ocr_classification,
     get_available_languages,
+    is_junction,
     process_batch,
     scan_folder,
 )
@@ -161,7 +162,7 @@ def _refuse_remote_links(candidate: str, base: str, value: str | Path) -> None:
     """Check every component below an allowed root without following links.
 
     os.path.realpath would open each junction or symlink, and Windows contacts the target
-    host (sending the user's NTLM hash) when the target is a network share. islink, isjunction
+    host (sending the user's NTLM hash) when the target is a network share. islink, is_junction
     and readlink only read the link itself.
     """
     current = base
@@ -169,7 +170,7 @@ def _refuse_remote_links(candidate: str, base: str, value: str | Path) -> None:
         if not part:
             continue
         current = current + os.sep + part
-        if os.path.islink(current) or os.path.isjunction(current):
+        if os.path.islink(current) or is_junction(current):
             try:
                 target = os.readlink(current)
             except OSError as error:

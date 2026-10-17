@@ -37,7 +37,7 @@ Guidance for Claude Code sessions working on MarkitdownTool. Keep this file shor
 .\installer\Build-Release.ps1                                   # exes + installer
 ```
 
-- The venv uses **Python 3.12** (`py -3.12 -m venv .venv`). Don't use the machine's default Python 3.15: `markitdown` requires `<3.15`.
+- The venv and release build use **Python 3.11** (`py -3.11 -m venv .venv`), so don't use 3.12+ APIs (e.g. `os.path.isjunction`; use `document_core.is_junction`). `markitdown` requires `<3.15`.
 - GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` (may not be on PATH in older sessions).
 - Release build needs Tesseract at `C:\Program Files\Tesseract-OCR` (installed via winget, has only `eng` + `osd`) and NSIS. Before `Build-Release.ps1`, copy `vie.traineddata` into `build\installer_payload\tesseract\tessdata\` (a copy exists in `%LOCALAPPDATA%\Programs\MarkitdownTool\tesseract\tessdata\`); the script requires it.
 

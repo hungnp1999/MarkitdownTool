@@ -283,6 +283,22 @@ def collect_supported_files(folder: str | Path, recursive: bool = False) -> list
     )
 
 
+def is_junction(path: str | os.PathLike) -> bool:
+    """os.path.isjunction, which Python 3.11 lacks: reads the link itself without following it."""
+    try:
+        return os.lstat(path).st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def _entry_is_junction(entry: os.DirEntry) -> bool:
+    """os.DirEntry.is_junction, which Python 3.11 lacks; uses the stat cached by scandir."""
+    try:
+        return getattr(entry.stat(follow_symlinks=False), "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+    except OSError:
+        return False
+
+
 def _is_hidden(entry: os.DirEntry) -> bool:
     if entry.name.startswith((".", "~$")):
         return True
@@ -318,8 +334,8 @@ def scan_folder(
     def walk(directory: Path, depth: int, hidden_folder: bool) -> Iterator[Path]:
         with os.scandir(directory) as entries:
             for entry in entries:
-                if entry.is_symlink() or entry.is_junction():
-                    if not entry.is_junction() and wanted(entry, hidden_folder):
+                if entry.is_symlink() or _entry_is_junction(entry):
+                    if entry.is_symlink() and wanted(entry, hidden_folder):
                         yield Path(entry.path)
                 elif entry.is_dir(follow_symlinks=False):
                     if recursive:

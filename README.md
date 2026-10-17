@@ -196,10 +196,10 @@ The installer bundles `eng`, `vie`, and `osd`, so those packages are available o
 
 ## Run from source
 
-Requirements: Windows 10/11 x64, Python 3.12, and Tesseract OCR with the required language data installed.
+Requirements: Windows 10/11 x64, Python 3.11 or later (below 3.15), and Tesseract OCR with the required language data installed.
 
 ```powershell
-py -3.12 -m venv .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python markitdown_gui.py
