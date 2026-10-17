@@ -2,6 +2,12 @@
 
 Notable changes to MarkitdownTool are listed here by release.
 
+## [Unreleased]
+
+### Added
+
+- HTML (`.html`, `.htm`), EPUB (`.epub`), plain text (`.txt`), Markdown (`.md`), JSON (`.json`), and XML (`.xml`) files convert to Markdown in the app, CLI, API, and MCP server. Remote images in HTML are kept as links and never downloaded (#11).
+
 ## [2.3.0] - 2026-10-17
 
 ### Added
