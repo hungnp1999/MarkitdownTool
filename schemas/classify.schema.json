@@ -27,7 +27,9 @@
           "reason_code",
           "reason",
           "size",
-          "sha256"
+          "sha256",
+          "text_quality",
+          "low_quality_pages"
         ],
         "properties": {
           "path": {
@@ -70,6 +72,23 @@
             ],
             "pattern": "^[0-9a-f]{64}$",
             "description": "SHA-256 of the source file; null if the file could not be read."
+          },
+          "text_quality": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Share of words in the PDF text layer that look correctly encoded (PDF only; null when there is too little text to judge)."
+          },
+          "low_quality_pages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "1-based pages below text_quality_threshold; they are OCRed again."
           }
         }
       }

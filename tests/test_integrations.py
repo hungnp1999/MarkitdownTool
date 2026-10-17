@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -24,6 +25,9 @@ from document_core import (
 )
 import integration_service
 from integration_service import ServiceError, convert, expand_inputs
+
+sys.path.insert(0, str(Path(__file__).parent))
+import pdf_samples  # noqa: E402
 
 
 def classification(path, supported=True, needs_ocr=False, reason=""):
@@ -620,6 +624,49 @@ class FormatConversionTests(TempTree):
             item = self.convert_one(source, mode="ocr_markdown", languages=["eng"])
         self.assertEqual((item["status"], item["stage"]), ("success", "ocr_markdown"), item["message"])
         self.assertIn("INVOICE 2026", item["markdown"])
+
+
+@unittest.skipUnless(pdf_samples.ARIAL.exists(), "needs the Arial font")
+class GarbledPdfTests(TempTree):
+    def test_classify_reports_quality_and_reason(self):
+        source = pdf_samples.make_pdf(self.root / "calibration.pdf", "good", "tcvn3")
+        item = integration_service.classify([source])["files"][0]
+        self.assertEqual((item["reason_code"], item["low_quality_pages"], item["needs_ocr"]), ("garbled_text", [2], True))
+        self.assertAlmostEqual(item["text_quality"], 0.55)
+
+    def test_markdown_mode_skips_garbled_pdfs(self):
+        source = pdf_samples.make_pdf(self.root / "calibration.pdf", "tcvn3")
+        result = convert([source], self.paths, mode="markdown")
+        item = result["files"][0]
+        self.assertEqual((item["status"], item["reason_code"], item["text_quality"]), ("skipped", "garbled_text", 0.1))
+        self.assertFalse(result["force_ocr"])
+
+    def test_force_ocr_marks_every_pdf(self):
+        source = pdf_samples.make_pdf(self.root / "good.pdf", "good")
+        seen = {}
+
+        def fake_batch(files, *args, classifications=(), **kwargs):
+            seen["classifications"] = classifications
+            return BatchResult(())
+
+        with patch.object(integration_service, "process_batch", side_effect=fake_batch),                 patch.object(integration_service, "_check_ocr_ready"):
+            result = convert([source, self.root / "b.DOCX"], self.paths, mode="ocr_markdown", force_ocr=True)
+        pdf, docx = seen["classifications"]
+        self.assertEqual((pdf.force_ocr, pdf.ocr_pages, docx.force_ocr), (True, (), False))
+        self.assertTrue(result["force_ocr"])
+
+    @unittest.skipUnless(
+        integration_service.find_tesseract(integration_service.APP_DIR)
+        and "vie" in integration_service.get_available_languages(integration_service.APP_DIR),
+        "needs Tesseract with Vietnamese",
+    )
+    def test_ocr_recovers_vietnamese_from_garbled_pages_and_keeps_good_ones(self):
+        source = pdf_samples.make_pdf(self.root / "calibration.pdf", "good", "tcvn3")
+        item = convert([source], self.paths, mode="ocr_markdown", languages=["vie"], include_content=True,
+                       output_dir=str(self.root / "out"))["files"][0]
+        self.assertEqual(item["status"], "success", item["message"])
+        self.assertEqual(item["markdown"].count("Ngày hiệu chuẩn"), 2, item["markdown"])
+        self.assertNotIn("Ngµy", item["markdown"])
 
 
 class McpTests(TempTree):

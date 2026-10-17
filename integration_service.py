@@ -22,6 +22,7 @@ from app_runtime import APP_DIR, APP_VERSION, GITHUB_REPOSITORY, cli_command, re
 from document_core import (
     IMAGE_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
+    TEXT_QUALITY_THRESHOLD,
     FileClassification,
     FileResult,
     ProcessingMode,
@@ -29,6 +30,7 @@ from document_core import (
     ScanLimitExceeded,
     classify_file,
     find_tesseract,
+    force_ocr_classification,
     get_available_languages,
     process_batch,
     scan_folder,
@@ -62,6 +64,7 @@ _REASON_CODES = {
     "Định dạng này chưa được hỗ trợ.": ("unsupported_format", "This file format is not supported."),
     "PDF cần OCR trước khi tạo Markdown.": ("needs_ocr", "This PDF needs OCR before Markdown conversion."),
     "Ảnh cần OCR trước khi tạo Markdown.": ("needs_ocr", "This image needs OCR before Markdown conversion."),
+    "PDF có chữ bị lỗi mã, cần OCR lại.": ("garbled_text", "This PDF's text layer looks wrongly encoded, so it needs OCR."),
     "Tệp không phù hợp với chế độ đã chọn.": ("not_eligible_for_mode", "The file does not apply to the selected mode."),
 }
 _STAGE_NAMES = {"Bỏ qua": "skipped", "Lỗi": "error", "Hoàn tất": "done"}
@@ -322,6 +325,8 @@ def classification_to_dict(classification: FileClassification) -> dict:
         "ocr_eligible": classification.ocr_eligible,
         "reason_code": reason_code,
         "reason": reason,
+        "text_quality": classification.text_quality,
+        "low_quality_pages": list(classification.low_quality_pages),
     }
 
 
@@ -423,6 +428,7 @@ def get_manifest(paths: AppPaths) -> dict:
             "tesseract": _tesseract_version(tesseract),
         },
         "reason_codes": sorted({code for code, _message in _REASON_CODES.values()}),
+        "text_quality_threshold": TEXT_QUALITY_THRESHOLD,
         "limits": integration_limits(config),
         "schemas": {name: f"{SCHEMA_BASE_URL}/{name}.schema.json" for name in SCHEMA_NAMES},
     }
@@ -497,7 +503,10 @@ def convert(
     cancel_event: Event | None = None,
     progress_callback: Callable[[ProgressUpdate], None] | None = None,
     roots: Sequence[str] | None = None,
+    force_ocr: bool = False,
 ) -> dict:
+    """Process files. force_ocr OCRs every PDF again, replacing its text layer, for PDFs whose
+    wrong encoding the text_quality check does not catch."""
     roots = allowed_roots() if roots is None else roots
     limits = integration_limits()
     try:
@@ -509,6 +518,9 @@ def convert(
     files = expand_inputs(inputs, recursive=recursive, roots=roots, limits=limits)
     languages = list(languages) if languages else list(read_config().get("ocr_languages", []))
     classifications = tuple(classify_file(path) for path in files)
+    if force_ocr:
+        classifications = tuple(force_ocr_classification(item) for item in classifications)
+    quality = {str(item.path): item.text_quality for item in classifications}
 
     needs_ocr = mode is ProcessingMode.OCR or (
         mode is ProcessingMode.OCR_MARKDOWN and any(item.needs_ocr for item in classifications)
@@ -553,12 +565,14 @@ def convert(
         data = file_result_to_dict(item, include_content, budget)
         # Hash what the converter read; files that were skipped were never opened.
         data.update(digests.get(str(item.path)) or source_digest(item.path, roots))
+        data["text_quality"] = quality.get(str(item.path))
         items.append(data)
     return {
         "schema_version": SCHEMA_VERSION,
         "mode": mode.value,
         "languages": languages if needs_ocr else [],
         "cancelled": result.cancelled,
+        "force_ocr": force_ocr,
         "summary": {
             "total": len(files),
             "succeeded": sum(item["status"] == "success" for item in items),

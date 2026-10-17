@@ -57,6 +57,18 @@ See [CHANGELOG.md](CHANGELOG.md) for versioned release notes.
 
 Images without resolution metadata, such as phone photos and screenshots, are OCR-processed at 300 DPI. Transparent images are placed on a white background first. Multi-page TIFF files become multi-page PDFs. Legacy `.doc` and `.ppt` files are not supported yet.
 
+## Wrongly encoded PDF text
+
+Some PDFs show correct text on screen but contain a wrong text layer, for example documents made with legacy Vietnamese fonts (TCVN3 `.VnTime`, which extracts as `Ngµy hiÖu chuÈn`), fonts without a Unicode map (`hi�u`), or a poor earlier OCR. MarkitdownTool scores each PDF page's text with `text_quality`: the share of words that look correctly encoded, from 0 to 1. The check looks for encoding damage, not spelling, so it works the same for any language.
+
+Pages that score below 0.8 are treated like scanned pages:
+
+- the file is reported with `reason_code: garbled_text`, its `text_quality`, and `low_quality_pages`;
+- the OCR modes OCR those pages again, replacing their text layer, and keep the other pages as they are;
+- **Markdown only** skips the file, because its text would be wrong.
+
+When the check misses a damaged file, use `--force-ocr` (CLI) or `"force_ocr": true` (API and MCP) to OCR every page of every PDF in the request again.
+
 Processing runs in the background so the window remains responsive. Cancel stops the batch after the current file finishes. Results, skipped files, and errors are reported separately.
 
 ## Adding documents
@@ -82,6 +94,7 @@ markitdowntool manifest
 
 - `--mode`: `ocr` (searchable PDF only), `markdown` (no OCR), or `ocr_markdown` (default).
 - `--json` prints a machine-readable result; add `--include-content` to embed the Markdown text.
+- `--force-ocr` OCRs every PDF again and replaces its text layer (see [Wrongly encoded PDF text](#wrongly-encoded-pdf-text)).
 - `--output-dir` must be absolute; results go to its `markdown\` and `ocrpdf\` subfolders.
 - `manifest` prints the installation's capabilities as JSON: interfaces, supported formats, modes, installed OCR languages, engine versions, limits, and schema URLs.
 - Folder inputs list every file, including unsupported ones (reported as `supported: false` / skipped with `reason_code: unsupported_format`), so nothing disappears from the result. Hidden and system files, Office lock files (`~$...`), and unsupported files inside hidden folders are left out.
@@ -100,7 +113,7 @@ markitdowntool api --port 8765
 | GET | `/v1/info` | — |
 | GET | `/v1/languages` | — |
 | POST | `/v1/classify` | `{"paths": ["D:\Docs"], "recursive": true}` |
-| POST | `/v1/convert` | `{"paths": [...], "mode": "markdown", "languages": ["vie", "eng"], "output_dir": "D:\Results", "recursive": false, "include_content": true}` |
+| POST | `/v1/convert` | `{"paths": [...], "mode": "markdown", "languages": ["vie", "eng"], "output_dir": "D:\Results", "recursive": false, "include_content": true, "force_ocr": false}` |
 
 `/v1/convert` also accepts uploads as `"files": [{"name": "report.docx", "content_base64": "..."}]` for callers that do not share the file system. Paths must be absolute paths on the machine running the server. Errors use `{"error": {"code", "message", "details"}}` with HTTP 400/401/404/405/413/503.
 

@@ -114,6 +114,8 @@ class MarkitdownApp:
             return self.t("scanned_needs_ocr")
         if reason == "Ảnh cần OCR trước khi tạo Markdown.":
             return self.t("image_needs_ocr")
+        if reason == "PDF có chữ bị lỗi mã, cần OCR lại.":
+            return self.t("garbled_needs_ocr")
         if reason == "Định dạng này chưa được hỗ trợ.":
             return self.t("skipped_format")
         return reason

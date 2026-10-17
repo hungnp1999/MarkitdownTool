@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("-o", "--output-dir", help="Absolute folder for results (markdown/ and ocrpdf/ are created inside).")
     convert.add_argument("-r", "--recursive", action="store_true", help="Include files in subfolders of folder inputs.")
     convert.add_argument("--include-content", action="store_true", help="Embed the Markdown text in --json output.")
+    convert.add_argument(
+        "--force-ocr",
+        action="store_true",
+        help="OCR every PDF again and replace its text layer. Garbled text layers are detected and re-OCRed automatically.",
+    )
     convert.add_argument("--json", action="store_true", help="Print a machine-readable JSON result.")
     convert.add_argument("-q", "--quiet", action="store_true", help="Do not print progress to stderr.")
 
@@ -101,6 +106,7 @@ def _run_convert(args, paths) -> int:
             output_dir=args.output_dir,
             recursive=args.recursive,
             include_content=args.include_content and args.json,
+            force_ocr=args.force_ocr,
             cancel_event=cancel,
             progress_callback=None if args.quiet or args.json else report,
         )

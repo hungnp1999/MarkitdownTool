@@ -6,6 +6,8 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ### Added
 
+- Wrongly encoded PDF text layers are detected. Each PDF gets a `text_quality` score (0–1, the share of words that look correctly encoded). Pages below 0.8 are reported with `reason_code: garbled_text` and `low_quality_pages`, and the OCR modes OCR them again with their text layer replaced, keeping the other pages unchanged. This recovers documents made with legacy Vietnamese fonts (TCVN3), fonts without a Unicode map, and poor earlier OCR. Previously these PDFs counted as having text, so OCR skipped them.
+- `--force-ocr` (CLI) and `force_ocr` (API, MCP) OCR every PDF again and replace its text layer, for damage the check does not catch. `convert` results report `force_ocr`; the manifest reports `text_quality_threshold`.
 - Legacy Excel 97–2003 (`.xls`) and CSV (`.csv`) files convert to Markdown in the app, CLI, API, and MCP server (#11).
 - Images (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`) are OCR-processed into searchable PDFs and Markdown in the OCR modes. Previously **Add files** listed them but every batch skipped them (#11). Images without resolution metadata are processed at 300 DPI, and transparent images are flattened onto white, because OCRmyPDF refuses both otherwise. In **Markdown only** mode images are skipped with `reason_code: needs_ocr`.
 - The manifest's `formats` entries include `kind` (`document` or `image`).
@@ -16,6 +18,7 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ### Changed
 
+- **Markdown only** now skips PDFs whose text layer is wrongly encoded (`garbled_text`) instead of converting the wrong text; use an OCR mode for them.
 - Folder inputs in the CLI, API, and MCP server now list unsupported files too (`supported: false`, or skipped with `reason_code: unsupported_format`) instead of dropping them. Hidden and system files, Office lock files, and unsupported files inside hidden folders are still left out. A folder with only unsupported files is no longer a `no_input_files` error.
 
 ### Security
