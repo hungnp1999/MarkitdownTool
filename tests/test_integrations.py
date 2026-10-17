@@ -138,9 +138,34 @@ class PathPolicyTests(TempTree):
             self.assertEqual(raised.exception.code, "path_not_allowed")
 
     def test_default_roots_are_local_drives_only(self):
-        roots = integration_service.allowed_roots({})
+        roots, source = integration_service.allowed_roots_with_source({}, {})
         self.assertTrue(roots)
+        self.assertEqual(source, "local_drives")
         self.assertFalse(any(root.startswith(("\\\\", "//")) for root in roots))
+
+    def test_configured_allowed_folders_are_used_when_the_variable_is_not_set(self):
+        config = {"allowed_folders": [str(self.root / "sub"), "relative\\folder", "", 7]}
+        roots, source = integration_service.allowed_roots_with_source({}, config)
+        self.assertEqual((roots, source), ([os.path.realpath(self.root / "sub")], "config"))
+        self.assertEqual([path.name for path in expand_inputs([self.root / "sub"], roots=roots)], ["c.xlsx", "d.png"])
+        with self.assertRaises(ServiceError):
+            expand_inputs([self.root / "a.pdf"], roots=roots)
+
+    def test_variable_overrides_configured_folders(self):
+        environment = {integration_service.ALLOWED_ROOTS_ENV: str(self.root)}
+        roots, source = integration_service.allowed_roots_with_source(environment, {"allowed_folders": [str(self.root / "sub")]})
+        self.assertEqual((roots, source), ([os.path.realpath(self.root)], "environment"))
+
+    def test_only_relative_or_invalid_folders_fall_back_to_local_drives(self):
+        for folders in ([], ["relative"], "D:\\Docs", None):
+            with self.subTest(folders=folders):
+                self.assertEqual(integration_service.allowed_roots_with_source({}, {"allowed_folders": folders})[1], "local_drives")
+
+    def test_info_reports_effective_roots(self):
+        with patch.object(integration_service, "read_config", return_value={"allowed_folders": [str(self.root)]}), \
+                patch.dict("os.environ", {integration_service.ALLOWED_ROOTS_ENV: ""}):
+            info = integration_service.get_info(self.paths)
+        self.assertEqual((info["allowed_roots"], info["allowed_roots_source"]), ([os.path.realpath(self.root)], "config"))
 
     def test_links_to_network_targets_are_refused_before_realpath(self):
         roots = self.roots(self.root)
@@ -270,23 +295,97 @@ class ApiTokenTests(TempTree):
         self.assertGreaterEqual(len(first), 32)
         self.assertEqual(load_or_create_api_token(token_file), first)
 
-    def test_server_without_explicit_token_still_requires_one(self):
+    def start_server(self, **options):
         from api_server import create_server
 
-        with patch.dict("os.environ", {}, clear=True), patch("api_server.load_or_create_api_token", return_value="generated"):
-            server = create_server(self.paths, "127.0.0.1", 0)
-        base = f"http://127.0.0.1:{server.server_address[1]}"
+        with patch.dict("os.environ", {}, clear=True):
+            server = create_server(self.paths, "127.0.0.1", 0, **options)
         threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    def status(self, url, token=None):
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
-            with self.assertRaises(urllib.error.HTTPError) as raised:
-                urllib.request.urlopen(base + "/v1/info", timeout=10)
-            self.assertEqual(raised.exception.code, 401)
-            request = urllib.request.Request(base + "/v1/info", headers={"Authorization": "Bearer generated"})
-            with urllib.request.urlopen(request, timeout=10) as response:
-                self.assertEqual(response.status, 200)
-        finally:
-            server.shutdown()
-            server.server_close()
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=10) as response:
+                return response.status
+        except urllib.error.HTTPError as error:
+            return error.code
+
+    def test_server_without_explicit_token_still_requires_one(self):
+        from app_runtime import load_or_create_api_token
+
+        token_file = self.root / "settings" / "api_token"
+        base = self.start_server(token_file=token_file)
+        token = load_or_create_api_token(token_file)
+        self.assertEqual(self.status(base + "/v1/info"), 401)
+        self.assertEqual(self.status(base + "/v1/info", token), 200)
+
+    def test_rotated_token_takes_effect_without_a_restart(self):
+        from app_runtime import load_or_create_api_token, rotate_api_token
+
+        token_file = self.root / "settings" / "api_token"
+        base = self.start_server(token_file=token_file)
+        old = load_or_create_api_token(token_file)
+        self.assertEqual(self.status(base + "/v1/info", old), 200)
+        new = rotate_api_token(token_file)
+        self.assertNotEqual(new, old)
+        self.assertEqual(self.status(base + "/v1/info", old), 401)
+        self.assertEqual(self.status(base + "/v1/info", new), 200)
+
+    def test_explicit_token_ignores_the_token_file(self):
+        from app_runtime import rotate_api_token
+
+        token_file = self.root / "settings" / "api_token"
+        base = self.start_server(token="explicit", token_file=token_file)
+        generated = rotate_api_token(token_file)
+        self.assertEqual(self.status(base + "/v1/info", "explicit"), 200)
+        self.assertEqual(self.status(base + "/v1/info", generated), 401)
+
+    def test_rotation_writes_a_new_restricted_file(self):
+        from app_runtime import load_or_create_api_token, rotate_api_token
+
+        token_file = self.root / "settings" / "api_token"
+        first = load_or_create_api_token(token_file)
+        second = rotate_api_token(token_file)
+        self.assertNotEqual(first, second)
+        self.assertEqual(token_file.read_text(encoding="utf-8"), second)
+        self.assertEqual(list(token_file.parent.glob("*.tmp")), [])
+        if os.name == "nt":
+            import subprocess
+
+            acl = subprocess.run(["icacls", str(token_file)], capture_output=True, text=True).stdout
+            self.assertNotIn("(I)", acl)
+            self.assertIn("NT AUTHORITY\\SYSTEM:(F)", acl)
+            self.assertNotIn("BUILTIN\\", acl)
+
+    def test_token_is_still_written_when_the_acl_cannot_be_set(self):
+        from app_runtime import load_or_create_api_token
+
+        token_file = self.root / "settings" / "api_token"
+        with patch("app_runtime.restrict_to_current_user", return_value=False), self.assertLogs("app_runtime", "WARNING"):
+            token = load_or_create_api_token(token_file)
+        self.assertEqual(token_file.read_text(encoding="utf-8"), token)
+
+    def test_cli_creates_and_rotates_the_token_without_printing_it(self):
+        from markitdown_cli import main
+
+        token_file = self.root / "settings" / "api_token"
+        tokens, outputs = [], []
+        for argv in (["api-token"], ["api-token", "--rotate", "--json"]):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with patch("app_runtime.prepare_runtime", return_value=self.paths), patch("app_runtime.API_TOKEN_FILE", token_file), \
+                    contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                self.assertEqual(main(argv), 0)
+            tokens.append(token_file.read_text(encoding="utf-8"))
+            outputs.append((stdout.getvalue(), stderr.getvalue()))
+        self.assertEqual(outputs[0][0].strip(), str(token_file))
+        self.assertEqual(json.loads(outputs[1][0]), {"token_file": str(token_file), "rotated": True})
+        self.assertNotEqual(tokens[0], tokens[1])
+        for token in tokens:
+            for stdout_text, stderr_text in outputs:
+                self.assertNotIn(token, stdout_text + stderr_text)
 
 
 class ConvertTests(TempTree):
@@ -495,6 +594,19 @@ class ApiTests(TempTree):
             with self.subTest(endpoint=endpoint):
                 status, body = self.request(method, path, {} if method == "POST" else None)
                 self.assertNotIn(body.get("error", {}).get("code"), ("not_found", "method_not_allowed"))
+
+    def test_requests_are_audited_without_paths_or_tokens(self):
+        with self.assertLogs("markitdowntool.audit", "INFO") as captured:
+            self.request("POST", "/v1/classify", {"paths": [str(self.root)]})
+            self.request("GET", "/v1/info", token="wrong")
+            self.request("GET", "/v1/health", token=None)
+        classify_line, unauthorized_line = captured.output
+        self.assertIn("client=127.0.0.1 method=POST endpoint=/v1/classify status=200 files=3", classify_line)
+        self.assertIn("endpoint=/v1/info status=401 files=-", unauthorized_line)
+        for line in captured.output:
+            self.assertNotIn(str(self.root), line)
+            self.assertNotIn("secret", line)
+            self.assertNotIn("wrong", line)
 
     def test_limit_errors_are_413(self):
         limits = {**integration_service.DEFAULT_LIMITS, "max_files": 1}

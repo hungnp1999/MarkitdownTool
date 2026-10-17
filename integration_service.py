@@ -109,17 +109,35 @@ def _local_drive_roots() -> list[str]:
     return [f"{letter}:\\" for letter in string.ascii_uppercase if get_drive_type(f"{letter}:\\") in _ALLOWED_DRIVE_TYPES]
 
 
-def allowed_roots(environment: dict[str, str] | None = None) -> list[str]:
-    r"""Folders integrations may read from and write to, as canonical paths without a trailing separator.
+def allowed_roots_with_source(
+    environment: dict[str, str] | None = None,
+    config: dict | None = None,
+) -> tuple[list[str], str]:
+    r"""Folders integrations may read from and write to, and where that list came from.
 
-    Defaults to every local drive, which excludes UNC shares and mapped network drives.
-    MARKITDOWNTOOL_ALLOWED_ROOTS (separated by os.pathsep) replaces the default; an
-    administrator can list a trusted share such as \\nas\docs there explicitly.
-    Roots are resolved with realpath so they use the same letter case as resolved inputs.
+    The first non-empty source wins:
+    "environment" - MARKITDOWNTOOL_ALLOWED_ROOTS, separated by os.pathsep; an administrator
+    can list a trusted share such as \\nas\docs there explicitly;
+    "config" - absolute folders in config.json "allowed_folders" (Settings -> Security);
+    "local_drives" - every local drive, which excludes UNC shares and mapped network drives.
+    Roots are canonical paths without a trailing separator, resolved with realpath so they use
+    the same letter case as resolved inputs.
     """
     configured = (os.environ if environment is None else environment).get(ALLOWED_ROOTS_ENV, "")
-    roots = [value.strip() for value in configured.split(os.pathsep) if value.strip()] or _local_drive_roots()
-    return [os.path.realpath(os.path.normpath(os.path.abspath(root))).rstrip(os.sep) for root in roots]
+    roots, source = [value.strip() for value in configured.split(os.pathsep) if value.strip()], "environment"
+    if not roots:
+        folders = (read_config() if config is None else config).get("allowed_folders")
+        if isinstance(folders, list):
+            roots = [value.strip() for value in folders if isinstance(value, str) and os.path.isabs(value.strip())]
+        source = "config"
+    if not roots:
+        roots, source = _local_drive_roots(), "local_drives"
+    return [os.path.realpath(os.path.normpath(os.path.abspath(root))).rstrip(os.sep) for root in roots], source
+
+
+def allowed_roots(environment: dict[str, str] | None = None, config: dict | None = None) -> list[str]:
+    """The folders from allowed_roots_with_source."""
+    return allowed_roots_with_source(environment, config)[0]
 
 
 def _within(path: str, roots: Sequence[str]) -> bool:
@@ -436,6 +454,7 @@ def get_manifest(paths: AppPaths) -> dict:
 
 def get_info(paths: AppPaths) -> dict:
     config = read_config()
+    roots, roots_source = allowed_roots_with_source(config=config)
     return {
         "name": "MarkitdownTool",
         "version": APP_VERSION,
@@ -446,6 +465,8 @@ def get_info(paths: AppPaths) -> dict:
         "default_ocr_languages": config.get("ocr_languages", []),
         "tesseract": find_tesseract(APP_DIR),
         "limits": integration_limits(config),
+        "allowed_roots": roots,
+        "allowed_roots_source": roots_source,
         "data_dir": str(paths.data_dir),
         "markdown_dir": str(paths.markdown_dir),
         "ocr_pdf_dir": str(paths.ocr_pdf_dir),

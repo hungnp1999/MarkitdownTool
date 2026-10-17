@@ -79,6 +79,13 @@ def build_parser() -> argparse.ArgumentParser:
     info = commands.add_parser("info", help="Show version, OCR runtime, and data folders.")
     info.add_argument("--json", action="store_true", help="Print a machine-readable JSON result.")
 
+    api_token = commands.add_parser(
+        "api-token",
+        help="Show where the generated HTTP API token is stored (creating it if needed), or replace it with --rotate.",
+    )
+    api_token.add_argument("--rotate", action="store_true", help="Create a new token; clients using the old one stop working.")
+    api_token.add_argument("--json", action="store_true", help="Print a machine-readable JSON result.")
+
     api = commands.add_parser("api", help="Run the local HTTP API server.")
     api.add_argument("--host", default="127.0.0.1", help="Address to bind (default 127.0.0.1).")
     api.add_argument("--port", type=int, default=8765, help="Port to listen on (default 8765).")
@@ -139,6 +146,24 @@ def _run_classify(args) -> int:
     return EXIT_OK
 
 
+def _run_api_token(args) -> int:
+    # The token itself is never printed, so it cannot end up in terminal history or CI logs.
+    # Clients read it from the file; people copy it from Settings -> Security.
+    from app_runtime import API_TOKEN_FILE, load_or_create_api_token, rotate_api_token
+
+    if args.rotate:
+        rotate_api_token()
+    else:
+        load_or_create_api_token()
+    if args.json:
+        _print_json({"token_file": str(API_TOKEN_FILE), "rotated": args.rotate})
+    else:
+        print(API_TOKEN_FILE)
+        if args.rotate:
+            print("Created a new token. Running API servers switch to it on their next request.", file=sys.stderr)
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -159,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
 
         serve(paths)
         return EXIT_OK
+    if args.command == "api-token":
+        return _run_api_token(args)
 
     as_json = getattr(args, "json", False)
     try:

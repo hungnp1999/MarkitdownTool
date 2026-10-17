@@ -119,6 +119,19 @@ markitdowntool api --port 8765
 
 The server binds to `127.0.0.1` by default. Every endpoint except `/v1/health` requires `Authorization: Bearer <token>`, because other accounts and processes on the same machine can also reach loopback. Set the token with `--token` or `MARKITDOWNTOOL_API_TOKEN`; otherwise MarkitdownTool generates one on first start and stores it in `%LOCALAPPDATA%\MarkitdownTool\api_token`, which only your Windows account can read. Binding to a non-loopback address requires an explicit token. On loopback, requests must use a loopback `Host` header (`localhost`, `127.0.0.1`, or `[::1]`), and POST bodies must be sent as `Content-Type: application/json`; this keeps web pages in a browser from calling the API through DNS rebinding or cross-site form posts. Conversions run one batch at a time.
 
+The generated token can be managed in **Settings → Security** (**Copy token**, **Rotate token**) or from the command line:
+
+```powershell
+markitdowntool api-token            # create the token if needed and print the token file's path
+markitdowntool api-token --rotate   # replace the token; add --json for {token_file, rotated}
+```
+
+The command never prints the token itself, so it cannot end up in terminal history or CI logs. Programs that call the API read the token from that file (for example `Get-Content (markitdowntool api-token)`); to paste it somewhere by hand, use **Copy token** in Settings → Security.
+
+A rotated token takes effect immediately: a running server rereads the token file when it changes, so the old token stops working without a restart. The token file is written with an explicit ACL that grants access only to your account and SYSTEM. Tokens created by older versions keep the inherited `%LOCALAPPDATA%` ACL until they are rotated.
+
+Every API request except `/v1/health` is recorded in the session log (`logs\api_*.log`) as an audit line with the client address, method, endpoint, HTTP status, number of files, and duration, for example `client=127.0.0.1 method=POST endpoint=/v1/convert status=200 files=3 duration_ms=5120`. Paths, document content, and tokens are never logged.
+
 ### MCP
 
 `markitdowntool mcp` runs a Model Context Protocol server over stdio with the tools `convert_documents`, `classify_documents`, `list_ocr_languages`, `get_tool_info`, and `get_manifest`. Add it to an MCP host configuration, for example:
@@ -147,13 +160,13 @@ The JSON results of all three interfaces are described by JSON Schemas (draft 20
 
 The CLI, API, and MCP server only accept input paths and `output_dir` values on local drives. UNC paths (`\\server\share`), WebDAV paths, mapped network drives, device paths (`\\?\`, `\\.\`), and junctions or symlinks that lead outside the allowed folders are refused with `path_not_allowed` (HTTP 403) before Windows touches the network. This keeps a malicious document or prompt from making an agent send your Windows credentials (NTLM hash) to a remote server.
 
-To narrow access further, for example when an AI agent uses the MCP server, list the allowed folders in `MARKITDOWNTOOL_ALLOWED_ROOTS`, separated by `;`:
+To narrow access further, for example when an AI agent uses the MCP server, add the folders under **Settings → Security → Allowed folders** (saved as `allowed_folders` in `config.json`), or list them in `MARKITDOWNTOOL_ALLOWED_ROOTS`, separated by `;`:
 
 ```powershell
 $env:MARKITDOWNTOOL_ALLOWED_ROOTS = "D:\Docs;D:\Results"
 ```
 
-A trusted file share can be allowed by listing it there explicitly.
+The environment variable wins over the Settings list; with neither, every local drive is allowed. `info` (and the MCP tool `get_tool_info`) shows the folders in effect as `allowed_roots` and where they came from as `allowed_roots_source` (`environment`, `config`, or `local_drives`). Restart running API or MCP servers after changing either. A trusted file share can be allowed by listing it explicitly.
 
 Links are checked without being followed, so a junction or symlink to a network share is refused before Windows opens it. Recursive folder scans do not enter linked folders. Each file is opened once and the opened handle is checked again, so a folder swapped for a junction after the check cannot redirect the conversion.
 

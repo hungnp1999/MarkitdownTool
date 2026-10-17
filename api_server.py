@@ -16,6 +16,11 @@ non-loopback address requires an explicit token. Paths are limited to the roots 
 integration_service.allowed_roots (local drives by default, never UNC shares). On loopback the
 server also rejects non-loopback Host headers (DNS rebinding) and POST bodies that are
 not application/json (cross-site form or text/plain posts that skip CORS preflight).
+
+When the server uses the generated token, it rereads api_token whenever the file changes, so
+a rotated token (markitdowntool api-token --rotate, or Settings -> Security) takes effect at once.
+Every request except /v1/health is written to the audit log (logger "markitdowntool.audit"):
+client address, method, endpoint, status, file count and duration, never paths, content or tokens.
 """
 
 import base64
@@ -28,6 +33,7 @@ import os
 import posixpath
 import sys
 import tempfile
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -116,10 +122,16 @@ def _write_uploads(files: object, folder: Path) -> list[Path]:
     return written
 
 
+audit_log = logging.getLogger("markitdowntool.audit")
+
+
 class ApiHandler(BaseHTTPRequestHandler):
     server_version = f"MarkitdownTool/{APP_VERSION}"
     app_paths: AppPaths
     token: str | None = None
+    # Set when the token comes from the generated token file, which can be rotated while running.
+    token_file: Path | None = None
+    token_cache: dict
     loopback_only = True
     roots: list[str] = []
 
@@ -127,6 +139,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         logging.getLogger(__name__).info("%s %s", self.address_string(), format % args)
 
     def _send(self, status: HTTPStatus, data: dict) -> None:
+        self.audit_status = int(status)
+        files = data.get("files")
+        self.audit_files = len(files) if isinstance(files, list) else None
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -137,12 +152,29 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _send_error(self, status: HTTPStatus, code: str, message: str, details: dict | None = None) -> None:
         self._send(status, {"error": ServiceError(code, message, details).to_dict()})
 
+    def _expected_token(self) -> str | None:
+        if self.token_file is None:
+            return self.token
+        try:
+            modified = self.token_file.stat().st_mtime_ns
+        except OSError:
+            return self.token_cache.get("token") or self.token
+        if self.token_cache.get("modified") != modified:
+            try:
+                value = self.token_file.read_text(encoding="utf-8").strip()
+            except OSError:
+                value = ""
+            if value:
+                self.token_cache.update(modified=modified, token=value)
+        return self.token_cache.get("token") or self.token
+
     def _authorized(self) -> bool:
-        if not self.token:
+        expected = self._expected_token()
+        if not expected:
             return True
         header = self.headers.get("Authorization", "")
         supplied = header[7:] if header.startswith("Bearer ") else ""
-        return hmac.compare_digest(supplied.encode("utf-8"), self.token.encode("utf-8"))
+        return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
 
     def _read_json(self) -> dict:
         try:
@@ -179,6 +211,23 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def _dispatch(self, method: str) -> None:
         route = self.path.split("?", 1)[0].rstrip("/")
+        self.audit_status, self.audit_files = None, None
+        started = time.monotonic()
+        try:
+            self._route(method, route)
+        finally:
+            if route != "/v1/health":
+                audit_log.info(
+                    "client=%s method=%s endpoint=%s status=%s files=%s duration_ms=%d",
+                    self.client_address[0],
+                    method,
+                    ascii(route)[1:-1][:200] or "/",
+                    self.audit_status,
+                    "-" if self.audit_files is None else self.audit_files,
+                    (time.monotonic() - started) * 1000,
+                )
+
+    def _route(self, method: str, route: str) -> None:
         if self.loopback_only and not is_loopback(request_host(self.headers.get("Host", ""))):
             # Blocks DNS rebinding: a web page served from another name must not reach the local API.
             self._reject(HTTPStatus.FORBIDDEN, "invalid_host", "The Host header must be a loopback address.")
@@ -268,19 +317,23 @@ def create_server(
     port: int = 8765,
     token: str | None = None,
     roots: list[str] | None = None,
+    token_file: Path | None = None,
 ) -> ThreadingHTTPServer:
     token = token or os.environ.get(TOKEN_ENV) or None
     if not is_loopback(host) and not token:
         raise ServiceError("token_required", f"Set --token or {TOKEN_ENV} before binding to a non-loopback address.")
     # Every request needs a token: other accounts and processes on this machine can reach loopback too.
     # The generated token lives in the per-user settings folder, which other Windows accounts cannot read.
-    token = token or load_or_create_api_token()
+    generated_token_file = None if token else (token_file or API_TOKEN_FILE)
+    token = token or load_or_create_api_token(generated_token_file)
     handler = type(
         "ConfiguredApiHandler",
         (ApiHandler,),
         {
             "app_paths": paths,
             "token": token,
+            "token_file": generated_token_file,
+            "token_cache": {},
             "loopback_only": is_loopback(host),
             "roots": allowed_roots() if roots is None else roots,
         },
