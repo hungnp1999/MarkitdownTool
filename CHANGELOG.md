@@ -2,7 +2,7 @@
 
 Notable changes to MarkitdownTool are listed here by release.
 
-## [Unreleased]
+## [2.3.0] - 2026-10-17
 
 ### Added
 
