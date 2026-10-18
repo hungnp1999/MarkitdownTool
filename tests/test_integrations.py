@@ -665,6 +665,10 @@ class OfficeGuiOnlyTests(TempTree):
                 self.assertEqual(code, "needs_office")
                 self.assertIn(f"Microsoft {app}", message)
 
+    def test_untrusted_source_reason_code(self):
+        code, message = integration_service._reason("Tệp tải từ Internet: không mở bằng Office để tránh tải tài nguyên từ xa.")
+        self.assertEqual((code, message), ("untrusted_source", "This file came from the internet, so it is not opened with Microsoft Office."))
+
 
 class ApiBindingTests(unittest.TestCase):
     def test_non_loopback_requires_token(self):

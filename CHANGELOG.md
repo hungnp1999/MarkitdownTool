@@ -8,6 +8,7 @@ Notable changes to MarkitdownTool are listed here by release.
 
 - HTML (`.html`, `.htm`), EPUB (`.epub`), plain text (`.txt`), Markdown (`.md`), JSON (`.json`), and XML (`.xml`) files convert to Markdown in the app, CLI, API, and MCP server. Remote images in HTML are kept as links and never downloaded (#11).
 - The app converts legacy Office and OpenDocument files (`.doc`, `.rtf`, `.odt`, `.ppt`, `.odp`, `.ods`) to Markdown through the installed Microsoft Word, PowerPoint or Excel. Each file is copied to a private temporary folder, opened read-only with macros disabled, and saved as `.docx`/`.pptx`/`.xlsx` first. An Office app that does not respond within 60 seconds is stopped (only the instance this conversion started) and the file is marked failed (#11).
+- Legacy Office files downloaded from the internet (Mark-of-the-Web with `ZoneId` 3 or higher) are skipped with `reason_code: untrusted_source` and never opened with Office, so a crafted file cannot make Office contact a remote server. Remove the mark (file **Properties → Unblock**) to convert a file you trust (#34).
 
 ### Changed
 

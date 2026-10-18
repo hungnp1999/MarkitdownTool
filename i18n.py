@@ -84,6 +84,7 @@ STRINGS = {
     "image_needs_ocr": ("This image needs OCR before Markdown conversion.", "Ảnh cần OCR trước khi tạo Markdown."),
     "garbled_needs_ocr": ("This PDF's text looks wrongly encoded and needs OCR again.", "PDF có chữ bị lỗi mã, cần OCR lại."),
     "needs_office": ("This format needs Microsoft {app}, which is not installed.", "Cần Microsoft {app} để đọc định dạng này."),
+    "untrusted_source": ("This file came from the internet, so it is not opened with Microsoft Office.", "Tệp tải từ Internet: không mở bằng Office để tránh tải tài nguyên từ xa."),
     "skipped": ("Skipped", "Bỏ qua"),
     "error": ("Error", "Lỗi"),
     "session_declined": ("Session ended. No files were processed.", "Đã kết thúc phiên; chưa xử lý tệp nào."),

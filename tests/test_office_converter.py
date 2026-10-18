@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import threading
@@ -7,7 +8,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import office_converter
-from office_converter import OFFICE_EXTENSIONS, convert_with_office, convert_with_timeout, office_app_available
+from office_converter import (
+    OFFICE_EXTENSIONS,
+    convert_with_office,
+    convert_with_timeout,
+    from_internet_zone,
+    office_app_available,
+)
 
 
 def fake_winreg(open_key):
@@ -229,6 +236,63 @@ class ConvertWithTimeoutTests(unittest.TestCase):
 
     def test_default_timeout_is_sixty_seconds(self):
         self.assertEqual(office_converter.DEFAULT_OFFICE_TIMEOUT_SECONDS, 60)
+
+
+class FromInternetZoneTests(unittest.TestCase):
+    def setUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temp.cleanup)
+        self.path = Path(self._temp.name) / "input.doc"
+        self.path.write_bytes(b"doc")
+
+    def test_never_untrusted_outside_windows(self):
+        with patch.object(office_converter.os, "name", "posix"):
+            self.assertFalse(from_internet_zone(self.path))
+
+    def zone(self, content: bytes | None):
+        if content is not None:
+            with open(f"{self.path}:Zone.Identifier", "wb") as stream:
+                stream.write(content)
+        return from_internet_zone(self.path)
+
+    @unittest.skipUnless(os.name == "nt", "NTFS alternate data streams")
+    def test_internet_zone_is_untrusted(self):
+        self.assertTrue(self.zone(b"[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.com/a.doc\r\n"))
+
+    @unittest.skipUnless(os.name == "nt", "NTFS alternate data streams")
+    def test_intranet_zone_is_trusted(self):
+        self.assertFalse(self.zone(b"[ZoneTransfer]\r\nZoneId=2\r\n"))
+
+    @unittest.skipUnless(os.name == "nt", "NTFS alternate data streams")
+    def test_file_without_stream_is_trusted(self):
+        self.assertFalse(self.zone(None))
+
+    @unittest.skipUnless(os.name == "nt", "NTFS alternate data streams")
+    def test_damaged_stream_is_untrusted(self):
+        self.assertTrue(self.zone(b"[ZoneTransfer]\r\nZoneId=internet\r\n"))
+        self.assertTrue(self.zone(b"garbage"))
+
+    def test_stream_contents_are_parsed(self):
+        cases = (
+            (b"[ZoneTransfer]\r\nZoneId=3\r\n", True),
+            (b"[ZoneTransfer]\r\nZoneId=4\r\n", True),
+            (b"[ZoneTransfer]\r\nzoneid = 2\r\n", False),
+            ("[ZoneTransfer]\r\nZoneId=3\r\n".encode("utf-16"), True),
+            (b"[ZoneTransfer]\r\nZoneId=x\r\n", True),
+            (b"", True),
+        )
+        for content, expected in cases:
+            with self.subTest(content=content), patch.object(office_converter.os, "name", "nt"), \
+                    patch("builtins.open", unittest.mock.mock_open(read_data=content)):
+                self.assertEqual(from_internet_zone(self.path), expected)
+
+    def test_missing_stream_and_unsupported_volume_are_trusted(self):
+        invalid_name = OSError(22, "invalid name")
+        invalid_name.winerror = 123
+        for error, expected in ((FileNotFoundError(), False), (invalid_name, False), (PermissionError(), True)):
+            with self.subTest(error=error), patch.object(office_converter.os, "name", "nt"), \
+                    patch("builtins.open", side_effect=error):
+                self.assertEqual(from_internet_zone(self.path), expected)
 
 
 if __name__ == "__main__":

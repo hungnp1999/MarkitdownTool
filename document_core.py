@@ -13,7 +13,7 @@ from pathlib import Path
 from threading import Event
 from typing import BinaryIO, Callable, ContextManager, Iterable, Iterator
 
-from office_converter import OFFICE_EXTENSIONS, convert_with_timeout, office_app_available
+from office_converter import OFFICE_EXTENSIONS, convert_with_timeout, from_internet_zone, office_app_available
 
 
 DOCUMENT_EXTENSIONS = {
@@ -23,6 +23,7 @@ DOCUMENT_EXTENSIONS = {
 # Images have no text layer, so they always go through OCR (image -> searchable PDF -> Markdown).
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 SUPPORTED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS | set(OFFICE_EXTENSIONS)
+UNTRUSTED_SOURCE_REASON = "Tệp tải từ Internet: không mở bằng Office để tránh tải tài nguyên từ xa."
 # Used when an image has no usable resolution metadata; OCRmyPDF refuses such images otherwise.
 DEFAULT_IMAGE_DPI = 300
 # Pages whose share of correctly encoded words is below this are OCRed again (force OCR).
@@ -570,8 +571,11 @@ def process_batch(
             break
 
         path = classification.path
-        if not _is_eligible(classification, mode):
-            reason = classification.reason or "Tệp không phù hợp với chế độ đã chọn."
+        eligible = _is_eligible(classification, mode)
+        # Checked on the original: the private copy Office opens loses the Zone.Identifier stream.
+        untrusted = eligible and path.suffix.lower() in OFFICE_EXTENSIONS and from_internet_zone(path)
+        if not eligible or untrusted:
+            reason = UNTRUSTED_SOURCE_REASON if untrusted else classification.reason or "Tệp không phù hợp với chế độ đã chọn."
             logger.info("File skipped: %s; reason=%s", path.name, reason)
             results.append(FileResult(path, FileStatus.SKIPPED, "Bỏ qua", message=reason))
             if progress_callback:

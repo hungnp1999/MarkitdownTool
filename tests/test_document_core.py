@@ -497,6 +497,31 @@ class OfficeBatchTests(unittest.TestCase):
         self.assertEqual([update.stage for update in updates], ["Markdown", "Hoàn tất"])
 
 
+    def test_office_file_from_the_internet_is_skipped_before_office_opens_it(self):
+        downloaded, local = self.root / "downloaded.doc", self.root / "local.doc"
+        downloaded.write_bytes(b"a")
+        local.write_bytes(b"b")
+        with patch("document_core.from_internet_zone", side_effect=lambda path: path == downloaded) as zone, \
+                patch("document_core.convert_with_timeout", side_effect=self.fake_office) as converter, \
+                patch("document_core.convert_markdown", return_value=self.markdown_dir / "local.md"):
+            result = self.run_batch([downloaded, local])
+
+        self.assertEqual(
+            (result.files[0].status, result.files[0].message),
+            (FileStatus.SKIPPED, "Tệp tải từ Internet: không mở bằng Office để tránh tải tài nguyên từ xa."),
+        )
+        self.assertEqual(result.files[1].status, FileStatus.SUCCESS)
+        self.assertEqual([call.args[0] for call in zone.call_args_list], [downloaded, local])
+        converter.assert_called_once()
+
+    def test_internet_zone_is_not_checked_for_other_formats(self):
+        source = self.root / "report.docx"
+        with patch("document_core.from_internet_zone") as zone, \
+                patch("document_core.convert_markdown", return_value=self.markdown_dir / "report.md"):
+            self.run_batch([source])
+        zone.assert_not_called()
+
+
 class ScanTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
