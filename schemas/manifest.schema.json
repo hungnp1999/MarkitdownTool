@@ -144,6 +144,26 @@
           },
           "ocr": {
             "type": "boolean"
+          },
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "gui",
+                "cli",
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "Where the format can be converted. Legacy Office formats are app-only (gui); the CLI, API and MCP server refuse them with reason_code office_gui_only."
+          },
+          "requires": {
+            "enum": [
+              "Word",
+              "PowerPoint",
+              "Excel"
+            ],
+            "description": "Microsoft Office app needed to convert this format; see engines.office."
           }
         }
       }
@@ -185,6 +205,15 @@
     },
     "engines": {
       "type": "object",
+      "properties": {
+        "office": {
+          "type": "object",
+          "description": "Whether each Microsoft Office app is installed for automation.",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      },
       "additionalProperties": {
         "type": [
           "string",

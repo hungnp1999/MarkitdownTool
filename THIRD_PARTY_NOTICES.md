@@ -45,6 +45,15 @@ https://github.com/python-excel/xlrd
 
 Microsoft MarkItDown uses xlrd to read legacy Excel (`.xls`) workbooks. xlrd only reads cell data; it does not run macros.
 
+## pywin32
+
+License: Python Software Foundation License (PSF-2.0)
+
+Repository:
+https://github.com/mhammond/pywin32
+
+MarkitdownTool uses pywin32 to automate an already installed Microsoft Word, PowerPoint, or Excel, which converts legacy Office and OpenDocument files (`.doc`, `.rtf`, `.odt`, `.ppt`, `.odp`, `.ods`). Microsoft Office is not distributed with MarkitdownTool; it is licensed separately by Microsoft.
+
 ## Pillow
 
 License: MIT-CMU License (HPND)

@@ -6,7 +6,8 @@ SPEC_DIR = Path(SPECPATH)
 
 datas = []
 binaries = []
-hiddenimports = []
+# office_converter imports pywin32 inside functions, so PyInstaller cannot see it.
+hiddenimports = ['pythoncom', 'pywintypes', 'win32com', 'win32com.client', 'win32gui', 'win32process']
 tmp_ret = collect_all('markitdown')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('magika')
