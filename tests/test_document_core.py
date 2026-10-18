@@ -389,6 +389,114 @@ class BatchProcessingTests(unittest.TestCase):
         self.assertEqual((result.files[0].status, result.files[0].message), (FileStatus.FAILED, "moved"))
 
 
+class OfficeBatchTests(unittest.TestCase):
+    def setUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temp.cleanup)
+        self.root = Path(self._temp.name)
+        self.markdown_dir = self.root / "markdown"
+        self.work_dirs = []
+
+    def fake_office(self, source, work_dir):
+        self.work_dirs.append(work_dir)
+        self.copied = source.read_bytes()
+        converted = work_dir / f"{source.stem}.docx"
+        converted.write_bytes(b"ooxml")
+        return converted
+
+    def run_batch(self, paths, mode=ProcessingMode.MARKDOWN, **kwargs):
+        classifications = [FileClassification(path, True, False, True, False) for path in paths]
+        return process_batch(
+            paths, mode, [], self.root, self.root / "ocrpdf", self.markdown_dir,
+            classifications=classifications, **kwargs
+        )
+
+    def test_office_file_is_converted_from_a_private_copy(self):
+        source = self.root / "báo cáo.doc"
+        source.write_bytes(b"legacy")
+        with patch("document_core.convert_with_timeout", side_effect=self.fake_office), \
+                patch("document_core.convert_markdown", return_value=self.markdown_dir / "báo cáo.md") as convert:
+            result = self.run_batch([source])
+
+        self.assertEqual(result.files[0].status, FileStatus.SUCCESS)
+        self.assertEqual(self.copied, b"legacy")
+        converted = convert.call_args.args[0]
+        self.assertEqual(converted.name, "input.docx")
+        self.assertNotEqual(converted.parent, source.parent)
+        self.assertEqual(convert.call_args.kwargs["output_source"], source)
+        self.assertFalse(self.work_dirs[0].exists())
+        self.assertEqual(sorted(path.name for path in self.root.iterdir()), ["báo cáo.doc", "markdown"])
+
+    def test_office_copy_reads_the_opened_stream(self):
+        source = self.root / "slides.ppt"
+
+        @contextmanager
+        def open_source(_path):
+            yield io.BytesIO(b"from stream")
+
+        with patch("document_core.convert_with_timeout", side_effect=self.fake_office), \
+                patch("document_core.convert_markdown", return_value=self.markdown_dir / "slides.md"):
+            result = self.run_batch([source], open_source=open_source)
+
+        self.assertEqual(result.files[0].status, FileStatus.SUCCESS)
+        self.assertEqual(self.copied, b"from stream")
+
+    def test_failed_office_file_cleans_up_and_the_batch_continues(self):
+        first, second = self.root / "hung.rtf", self.root / "next.odt"
+        first.write_bytes(b"a")
+        second.write_bytes(b"b")
+
+        def converter(source, work_dir):
+            self.work_dirs.append(work_dir)
+            if len(self.work_dirs) == 1:
+                raise TimeoutError("Microsoft Word did not respond in time.")
+            return self.fake_office(source, work_dir)
+
+        with patch("document_core.convert_with_timeout", side_effect=converter), \
+                patch("document_core.convert_markdown", return_value=self.markdown_dir / "next.md"):
+            result = self.run_batch([first, second])
+
+        self.assertEqual(
+            [(item.status, item.message) for item in result.files],
+            [(FileStatus.FAILED, "Microsoft Word did not respond in time."), (FileStatus.SUCCESS, "")],
+        )
+        self.assertFalse(any(work_dir.exists() for work_dir in self.work_dirs))
+
+    def test_ocr_only_mode_skips_office_files(self):
+        source = self.root / "sheet.ods"
+        classification = FileClassification(source, True, False, True, False)
+        with patch("document_core.convert_with_timeout") as converter:
+            result = process_batch(
+                [source], ProcessingMode.OCR, [], self.root, self.root / "ocrpdf", self.markdown_dir,
+                classifications=[classification]
+            )
+
+        converter.assert_not_called()
+        self.assertEqual(
+            (result.files[0].status, result.files[0].message),
+            (FileStatus.SKIPPED, "Tệp không phù hợp với chế độ đã chọn."),
+        )
+
+    def test_progress_and_cancel_work_for_office_files(self):
+        first, second = self.root / "a.doc", self.root / "b.doc"
+        first.write_bytes(b"a")
+        second.write_bytes(b"b")
+        cancel = Event()
+        updates = []
+
+        def converter(source, work_dir):
+            cancel.set()
+            return self.fake_office(source, work_dir)
+
+        with patch("document_core.convert_with_timeout", side_effect=converter), \
+                patch("document_core.convert_markdown", return_value=self.markdown_dir / "a.md"):
+            result = self.run_batch([first, second], cancel_event=cancel, progress_callback=updates.append)
+
+        self.assertTrue(result.cancelled)
+        self.assertEqual(len(result.files), 1)
+        self.assertEqual([update.stage for update in updates], ["Markdown", "Hoàn tất"])
+
+
 class ScanTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
