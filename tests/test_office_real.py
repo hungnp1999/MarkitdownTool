@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app_paths import build_app_paths
-from document_core import FileStatus, ProcessingMode, classify_file, process_batch
+from document_core import FileStatus, ProcessingMode, classify_file, output_path_for, process_batch
 from office_converter import OFFICE_EXTENSIONS, office_app_available
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -41,10 +41,11 @@ class RealOfficeConversionTests(OfficeFixtureTest):
         app = OFFICE_EXTENSIONS[extension]
         if not office_app_available(app):
             self.skipTest(f"needs Microsoft {app}")
-        result = self.run_gui_batch(self.copy_fixture(extension))
+        source = self.copy_fixture(extension)
+        result = self.run_gui_batch(source)
         item = result.files[0]
         self.assertEqual(item.status, FileStatus.SUCCESS, item.message)
-        self.assertEqual(item.outputs[0].name, "sample.md")
+        self.assertEqual(item.outputs[0], output_path_for(source, self.root / "markdown", ".md"))
         return item.outputs[0].read_text(encoding="utf-8")
 
     def test_doc(self):
