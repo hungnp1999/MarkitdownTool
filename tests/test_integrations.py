@@ -767,6 +767,14 @@ class FormatConversionTests(TempTree):
         self.assertEqual(item["status"], "success")
         self.assertIn("| TB-01 | Cân điện tử | 2026-03-15 |", item["markdown"])
 
+    def test_outlook_message_keeps_subject_and_vietnamese_body(self):
+        source = self.root / "sample.msg"
+        shutil.copyfile(Path(__file__).parent / "fixtures" / "sample.msg", source)
+        item = self.convert_one(source)
+        self.assertEqual(item["status"], "success")
+        self.assertIn("Biên bản hiệu chuẩn thiết bị TB-01", item["markdown"])
+        self.assertIn("Thiết bị Cân điện tử (mã TB-01) đã được hiệu chuẩn ngày 2026-03-15.", item["markdown"])
+
     def test_csv_in_common_encodings(self):
         for encoding in ("utf-8", "utf-8-sig", "utf-16"):
             with self.subTest(encoding=encoding):

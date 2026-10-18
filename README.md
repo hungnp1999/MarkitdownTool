@@ -56,6 +56,7 @@ See [CHANGELOG.md](CHANGELOG.md) for versioned release notes.
 | HTML | `.html`, `.htm` | Directly (remote images are linked, never downloaded) |
 | EPUB | `.epub` | Directly |
 | Text, Markdown, JSON, XML | `.txt`, `.md`, `.json`, `.xml` | Directly, as text |
+| Outlook e-mail | `.msg` | Directly (headers and plain-text body; attachments are not converted) |
 | Images | `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp` | Only through OCR (**OCR only** or **OCR then Markdown**) |
 | Legacy Office, OpenDocument | `.doc`, `.rtf`, `.odt`, `.ppt`, `.odp`, `.ods` | App only, through the installed Microsoft Word, PowerPoint or Excel |
 

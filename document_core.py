@@ -18,7 +18,7 @@ from office_converter import OFFICE_EXTENSIONS, convert_with_timeout, from_inter
 
 DOCUMENT_EXTENSIONS = {
     ".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".csv",
-    ".html", ".htm", ".epub", ".txt", ".md", ".json", ".xml",
+    ".html", ".htm", ".epub", ".txt", ".md", ".json", ".xml", ".msg",
 }
 # Images have no text layer, so they always go through OCR (image -> searchable PDF -> Markdown).
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}

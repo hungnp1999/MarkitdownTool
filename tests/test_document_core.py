@@ -108,7 +108,7 @@ class ClassificationTests(unittest.TestCase):
                 self.assertEqual((result.supported, result.needs_ocr, result.markdown_eligible), (True, False, True))
 
     def test_markitdown_text_formats_are_ready(self):
-        for name in ("page.HTML", "page.htm", "book.epub", "notes.txt", "notes.md", "data.json", "data.xml"):
+        for name in ("page.HTML", "page.htm", "book.epub", "notes.txt", "notes.md", "data.json", "data.xml", "mail.msg"):
             with self.subTest(name=name):
                 result = classify_file(name)
                 self.assertEqual((result.supported, result.needs_ocr, result.markdown_eligible), (True, False, True))
