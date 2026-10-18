@@ -112,6 +112,7 @@ markitdowntool manifest
 - `--output-dir` must be absolute; results go to its `markdown\` and `ocrpdf\` subfolders.
 - `manifest` prints the installation's capabilities as JSON: interfaces, supported formats, modes, installed OCR languages, engine versions, limits, and schema URLs.
 - Folder inputs list every file, including unsupported ones (reported as `supported: false` / skipped with `reason_code: unsupported_format`), so nothing disappears from the result. Hidden and system files, Office lock files (`~$...`), and unsupported files inside hidden folders are left out.
+- Legacy Office and OpenDocument files (`.doc`, `.rtf`, `.odt`, `.ppt`, `.odp`, `.ods`) are refused with `reason_code: office_gui_only` here and in the HTTP API and MCP server. `manifest` lists them with `"interfaces": ["gui"]` and the Office app they need (`requires`), and `engines.office` reports which Office apps are installed. Opening them needs Microsoft Office, which can reach the network while it opens a file, so only the app will convert them.
 - Exit codes: `0` success (skipped files are not failures), `1` at least one file failed or the batch was cancelled, `2` the request could not run (missing path, OCR runtime, or language).
 
 ### HTTP API

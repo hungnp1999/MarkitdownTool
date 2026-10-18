@@ -4,3 +4,4 @@ pdfplumber==0.11.10
 pypdfium2==5.14.0
 pyinstaller==6.22.3
 mcp==2.3.0
+pywin32==312; sys_platform == "win32"

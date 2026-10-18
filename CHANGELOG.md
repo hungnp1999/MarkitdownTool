@@ -13,6 +13,7 @@ Notable changes to MarkitdownTool are listed here by release.
 ### Changed
 
 - The CLI, HTTP API, and MCP server report legacy Office and OpenDocument files (`.doc`, `.rtf`, `.odt`, `.ppt`, `.odp`, `.ods`) with `reason_code: office_gui_only` instead of `unsupported_format`. These formats will be converted only in the app, through Microsoft Office, because Office can reach the network while it opens a file (ADR-011, #11). Without the matching Office app the app reports them with `needs_office`.
+- `manifest` formats now carry `interfaces` (where each format can be converted). Legacy Office formats are listed with `"interfaces": ["gui"]` and `requires` (`Word`, `PowerPoint` or `Excel`), and `engines.office` reports which Office apps are installed (#30).
 
 ## [2.3.0] - 2026-10-17
 
