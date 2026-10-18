@@ -13,7 +13,7 @@ from pathlib import Path
 from threading import Event
 from typing import BinaryIO, Callable, ContextManager, Iterable, Iterator
 
-from office_converter import OFFICE_EXTENSIONS, office_app_available
+from office_converter import OFFICE_EXTENSIONS, convert_with_timeout, office_app_available
 
 
 DOCUMENT_EXTENSIONS = {
@@ -511,6 +511,21 @@ def convert_markdown(
     return output_markdown
 
 
+def convert_office_markdown(source: Path, output_dir: Path, stream: BinaryIO | None = None) -> Path:
+    """Convert a legacy Office file to OOXML in a private temporary folder, then to Markdown."""
+    with tempfile.TemporaryDirectory(prefix="markitdowntool-office-", ignore_cleanup_errors=True) as work:
+        work_dir = Path(work)
+        copy = work_dir / f"input{source.suffix.lower()}"
+        with copy.open("wb") as target:
+            if stream is None:
+                with source.open("rb") as original:
+                    shutil.copyfileobj(original, target)
+            else:
+                shutil.copyfileobj(stream, target)
+        converted = convert_with_timeout(copy, work_dir)
+        return convert_markdown(converted, output_dir, output_source=source)
+
+
 def _is_eligible(classification: FileClassification, mode: ProcessingMode) -> bool:
     if mode is ProcessingMode.OCR:
         return classification.ocr_eligible
@@ -582,14 +597,17 @@ def process_batch(
                         markdown_source = ocr_pdf
                     if progress_callback:
                         progress_callback(ProgressUpdate(index, len(paths), path, "Markdown"))
-                    outputs.append(
-                        convert_markdown(
-                            markdown_source,
-                            markdown_output_dir,
-                            output_source=path if markdown_source != path else None,
-                            stream=stream if markdown_source == path else None,
+                    if path.suffix.lower() in OFFICE_EXTENSIONS:
+                        outputs.append(convert_office_markdown(path, markdown_output_dir, stream))
+                    else:
+                        outputs.append(
+                            convert_markdown(
+                                markdown_source,
+                                markdown_output_dir,
+                                output_source=path if markdown_source != path else None,
+                                stream=stream if markdown_source == path else None,
+                            )
                         )
-                    )
                     stage = "OCR + Markdown" if classification.needs_ocr and mode is ProcessingMode.OCR_MARKDOWN else "Markdown"
 
             results.append(FileResult(path, FileStatus.SUCCESS, stage, tuple(outputs)))
