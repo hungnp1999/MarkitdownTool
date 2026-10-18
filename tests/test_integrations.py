@@ -71,7 +71,7 @@ class FolderCollectionTests(TempTree):
 class ExpandInputsTests(TempTree):
     def test_mixes_files_and_folders_without_duplicates(self):
         found = expand_inputs([self.root / "a.pdf", self.root, self.root / "archive.zip"])
-        self.assertEqual([path.name for path in found], ["a.pdf", "b.DOCX", "archive.zip"])
+        self.assertEqual([path.name for path in found], ["a.pdf", "archive.zip", "b.DOCX"])
 
     def test_missing_paths_are_reported_together(self):
         with self.assertRaises(ServiceError) as raised:
