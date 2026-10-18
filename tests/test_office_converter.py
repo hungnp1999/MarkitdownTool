@@ -1,12 +1,13 @@
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import office_converter
-from office_converter import OFFICE_EXTENSIONS, convert_with_office, office_app_available
+from office_converter import OFFICE_EXTENSIONS, convert_with_office, convert_with_timeout, office_app_available
 
 
 def fake_winreg(open_key):
@@ -186,6 +187,48 @@ class ConvertWithOfficeTests(unittest.TestCase):
         opened = next(index for index, event in enumerate(self.events) if event[0] == "open")
         self.assertEqual(seen[0][0], 1234)
         self.assertLessEqual(seen[0][1], opened)
+
+
+class ConvertWithTimeoutTests(unittest.TestCase):
+    def setUp(self):
+        self.release = threading.Event()
+        self.addCleanup(self.release.set)
+        patcher = patch.object(office_converter, "kill_process", side_effect=lambda pid: self.release.set() or True)
+        self.kill = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def hanging_converter(self, pid):
+        def converter(source, work_dir, on_started):
+            on_started(pid)
+            self.release.wait(5)
+            return work_dir / "never.docx"
+
+        return converter
+
+    def test_hung_instance_is_killed_by_its_pid(self):
+        with self.assertRaises(TimeoutError) as raised:
+            convert_with_timeout(Path("input.doc"), Path("work"), timeout=0.05, converter=self.hanging_converter(4321))
+        self.assertEqual(str(raised.exception), "Microsoft Word did not respond in time.")
+        self.kill.assert_called_once_with(4321)
+
+    def test_unknown_pid_kills_nothing(self):
+        with self.assertRaises(TimeoutError):
+            convert_with_timeout(Path("input.ppt"), Path("work"), timeout=0.05, converter=self.hanging_converter(None))
+        self.kill.assert_not_called()
+
+    def test_result_and_errors_pass_through(self):
+        result = convert_with_timeout(Path("input.ods"), Path("work"), converter=lambda s, w, on_started: w / "input.xlsx")
+        self.assertEqual(result, Path("work") / "input.xlsx")
+
+        def failing(source, work_dir, on_started):
+            raise RuntimeError("Microsoft Excel could not open this file.")
+
+        with self.assertRaisesRegex(RuntimeError, "could not open"):
+            convert_with_timeout(Path("input.ods"), Path("work"), converter=failing)
+        self.kill.assert_not_called()
+
+    def test_default_timeout_is_sixty_seconds(self):
+        self.assertEqual(office_converter.DEFAULT_OFFICE_TIMEOUT_SECONDS, 60)
 
 
 if __name__ == "__main__":
