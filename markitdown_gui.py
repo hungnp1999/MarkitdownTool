@@ -35,6 +35,7 @@ from document_core import (
     ProgressUpdate,
     IMAGE_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
+    UNTRUSTED_SOURCE_REASON,
     classify_file,
     collect_supported_files,
     find_tesseract,
@@ -132,6 +133,8 @@ class MarkitdownApp:
             return self.t("garbled_needs_ocr")
         if reason == "Định dạng này chưa được hỗ trợ.":
             return self.t("skipped_format")
+        if reason == UNTRUSTED_SOURCE_REASON:
+            return self.t("untrusted_source")
         for app in set(OFFICE_EXTENSIONS.values()):
             if reason == translate("needs_office", "vi", app=app):
                 return self.t("needs_office", app=app)
@@ -1067,7 +1070,7 @@ class MarkitdownApp:
         failed = sum(item.status is FileStatus.FAILED for item in result.files)
         lines = [self.t("result_counts", success=successful, skipped=skipped, failed=failed)]
         for item in result.files:
-            detail = ", ".join(path.name for path in item.outputs) or item.message
+            detail = ", ".join(path.name for path in item.outputs) or self._translate_reason(item.message)
             lines.append(f"{item.path.name} · {self._translate_stage(item.stage)}: {detail}")
             if item.status is FileStatus.FAILED:
                 logging.error("%s: %s", item.path, item.message)

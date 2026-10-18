@@ -34,6 +34,33 @@ def office_app_available(app: str) -> bool:
         return False
 
 
+_INTERNET_ZONE = 3  # URLZONE_INTERNET; 4 is URLZONE_UNTRUSTED
+_ERROR_INVALID_NAME = 123  # a volume without alternate data streams (FAT, exFAT) rejects the ":" name
+
+
+def from_internet_zone(path: str | os.PathLike) -> bool:
+    """True when the file carries Mark-of-the-Web from the Internet or Restricted zone.
+    A stream that exists but cannot be read or parsed counts as untrusted."""
+    if os.name != "nt":
+        return False
+    try:
+        with open(f"{os.fspath(path)}:Zone.Identifier", "rb") as stream:
+            data = stream.read(4096)
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        return getattr(error, "winerror", None) != _ERROR_INVALID_NAME
+    text = data.decode("utf-16") if data.startswith((b"\xff\xfe", b"\xfe\xff")) else data.decode("utf-8", "replace")
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip().lower() == "zoneid":
+            try:
+                return int(value.strip()) >= _INTERNET_ZONE
+            except ValueError:
+                return True
+    return True
+
+
 # app -> (SaveAs file format, extension): wdFormatXMLDocument, ppSaveAsOpenXMLPresentation, xlOpenXMLWorkbook.
 _SAVE_FORMATS = {"Word": (12, ".docx"), "PowerPoint": (24, ".pptx"), "Excel": (51, ".xlsx")}
 _EXECUTABLES = {"Word": "WINWORD.EXE", "PowerPoint": "POWERPNT.EXE", "Excel": "EXCEL.EXE"}

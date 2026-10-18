@@ -24,6 +24,7 @@ from document_core import (
     IMAGE_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     TEXT_QUALITY_THRESHOLD,
+    UNTRUSTED_SOURCE_REASON,
     FileClassification,
     FileResult,
     ProcessingMode,
@@ -77,6 +78,10 @@ _REASON_CODES = {
     "Cần Microsoft Word để đọc định dạng này.": ("needs_office", "This format needs Microsoft Word, which is not installed."),
     "Cần Microsoft PowerPoint để đọc định dạng này.": ("needs_office", "This format needs Microsoft PowerPoint, which is not installed."),
     "Cần Microsoft Excel để đọc định dạng này.": ("needs_office", "This format needs Microsoft Excel, which is not installed."),
+    UNTRUSTED_SOURCE_REASON: (
+        "untrusted_source",
+        "This file came from the internet, so it is not opened with Microsoft Office.",
+    ),
     _OFFICE_GUI_ONLY: (
         "office_gui_only",
         "Legacy Office formats are converted only in the MarkitdownTool app, not through the CLI, API or MCP.",
