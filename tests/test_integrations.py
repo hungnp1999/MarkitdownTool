@@ -1,6 +1,7 @@
 import base64
 import contextlib
 import hashlib
+import http.server
 import io
 import json
 import os
@@ -11,6 +12,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -40,7 +42,7 @@ class TempTree(unittest.TestCase):
         self._temp = tempfile.TemporaryDirectory()
         self.root = Path(self._temp.name)
         (self.root / "sub").mkdir()
-        for name in ("a.pdf", "b.DOCX", "notes.txt", "~$b.docx", "sub/c.xlsx", "sub/d.png"):
+        for name in ("a.pdf", "b.DOCX", "archive.zip", "~$b.docx", "sub/c.xlsx", "sub/d.png"):
             (self.root / name).write_bytes(b"x")
         self.paths = build_app_paths(self.root, self.root / "local")
 
@@ -68,8 +70,8 @@ class FolderCollectionTests(TempTree):
 
 class ExpandInputsTests(TempTree):
     def test_mixes_files_and_folders_without_duplicates(self):
-        found = expand_inputs([self.root / "a.pdf", self.root, self.root / "notes.txt"])
-        self.assertEqual([path.name for path in found], ["a.pdf", "b.DOCX", "notes.txt"])
+        found = expand_inputs([self.root / "a.pdf", self.root, self.root / "archive.zip"])
+        self.assertEqual([path.name for path in found], ["a.pdf", "archive.zip", "b.DOCX"])
 
     def test_missing_paths_are_reported_together(self):
         with self.assertRaises(ServiceError) as raised:
@@ -226,7 +228,7 @@ class LimitTests(TempTree):
 
     def test_too_many_files_is_a_limit_error(self):
         self.assertEqual(len(expand_inputs([self.root], limits=self.limits(max_files=3))), 3)
-        for inputs in ([self.root], [self.root / "a.pdf", self.root / "b.DOCX", self.root / "notes.txt"]):
+        for inputs in ([self.root], [self.root / "a.pdf", self.root / "b.DOCX", self.root / "archive.zip"]):
             with self.subTest(inputs=inputs), self.assertRaises(ServiceError) as raised:
                 expand_inputs(inputs, recursive=True, limits=self.limits(max_files=2))
             self.assertEqual(raised.exception.code, "limit_exceeded")
@@ -401,7 +403,7 @@ class ConvertTests(TempTree):
         ))
 
     def run_convert(self, **options):
-        inputs = [self.root / "a.pdf", self.root / "notes.txt", self.root / "b.DOCX"]
+        inputs = [self.root / "a.pdf", self.root / "archive.zip", self.root / "b.DOCX"]
         with patch.object(integration_service, "classify_file", side_effect=lambda path: classification(path)), \
                 patch.object(integration_service, "process_batch", side_effect=self.fake_batch):
             return convert(inputs, self.paths, **options)
@@ -657,11 +659,11 @@ class ContractTests(TempTree):
         result = integration_service.classify([self.root], recursive=True)
         self.validate("classify", result)
         by_name = {Path(item["path"]).name: item for item in result["files"]}
-        self.assertEqual(sorted(by_name), ["a.pdf", "b.DOCX", "c.xlsx", "d.png", "notes.txt"])
-        self.assertEqual((by_name["notes.txt"]["supported"], by_name["notes.txt"]["reason_code"]), (False, "unsupported_format"))
+        self.assertEqual(sorted(by_name), ["a.pdf", "archive.zip", "b.DOCX", "c.xlsx", "d.png"])
+        self.assertEqual((by_name["archive.zip"]["supported"], by_name["archive.zip"]["reason_code"]), (False, "unsupported_format"))
         self.assertEqual((by_name["d.png"]["needs_ocr"], by_name["d.png"]["reason_code"]), (True, "needs_ocr"))
-        self.assertEqual(by_name["notes.txt"]["size"], 1)
-        self.assertEqual(by_name["notes.txt"]["sha256"], hashlib.sha256(b"x").hexdigest())
+        self.assertEqual(by_name["archive.zip"]["size"], 1)
+        self.assertEqual(by_name["archive.zip"]["sha256"], hashlib.sha256(b"x").hexdigest())
 
     def test_convert_reports_unsupported_files_as_skipped_with_digests(self):
         def fake_batch(files, *args, open_source=None, **kwargs):
@@ -718,6 +720,89 @@ class FormatConversionTests(TempTree):
                 item = self.convert_one(source)
                 self.assertEqual(item["status"], "success")
                 self.assertIn("| TB-01 | Cân điện tử |", item["markdown"])
+
+    def test_html_table_keeps_vietnamese_text(self):
+        source = self.root / "devices.html"
+        source.write_text(
+            '<html><head><meta charset="utf-8"></head><body><table>'
+            "<tr><th>Mã</th><th>Tên thiết bị</th></tr><tr><td>TB-01</td><td>Cân điện tử</td></tr>"
+            "</table></body></html>",
+            encoding="utf-8",
+        )
+        item = self.convert_one(source)
+        self.assertEqual(item["status"], "success")
+        self.assertIn("| TB-01 | Cân điện tử |", item["markdown"])
+
+    def test_html_does_not_fetch_remote_images(self):
+        requests = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            source = self.root / "remote.html"
+            source.write_text(
+                f'<html><body><p>Cân điện tử</p><img src="http://127.0.0.1:{server.server_port}/x.png"></body></html>',
+                encoding="utf-8",
+            )
+            item = self.convert_one(source)
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(item["status"], "success")
+        self.assertEqual(requests, [])
+
+    def test_epub_keeps_vietnamese_text(self):
+        source = self.root / "book.epub"
+        with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as epub:
+            epub.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+            epub.writestr(
+                "META-INF/container.xml",
+                '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                '<rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles>'
+                "</container>",
+            )
+            epub.writestr(
+                "content.opf",
+                '<?xml version="1.0" encoding="utf-8"?>'
+                '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">'
+                '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                '<dc:identifier id="id">test-book</dc:identifier><dc:title>Thiết bị</dc:title><dc:language>vi</dc:language>'
+                "</metadata>"
+                '<manifest><item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/></manifest>'
+                '<spine><itemref idref="c1"/></spine></package>',
+            )
+            epub.writestr(
+                "chapter1.xhtml",
+                '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml">'
+                "<head><title>Chương 1</title></head><body><p>Cân điện tử</p></body></html>",
+            )
+        item = self.convert_one(source)
+        self.assertEqual(item["status"], "success")
+        self.assertIn("Cân điện tử", item["markdown"])
+
+    def test_plain_text_formats(self):
+        contents = {
+            ".txt": "Cân điện tử\n",
+            ".md": "# Thiết bị\n\nCân điện tử\n",
+            ".json": '{"ten": "Cân điện tử"}\n',
+        }
+        for extension, text in contents.items():
+            with self.subTest(extension=extension):
+                source = self.root / f"devices{extension}"
+                source.write_text(text, encoding="utf-8")
+                item = self.convert_one(source)
+                self.assertEqual(item["status"], "success")
+                self.assertIn("Cân điện tử", item["markdown"])
 
     def test_images_are_skipped_without_ocr(self):
         item = self.convert_one(self.root / "sub" / "d.png")
