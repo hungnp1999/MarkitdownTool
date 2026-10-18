@@ -83,6 +83,7 @@ STRINGS = {
     "scanned_needs_ocr": ("This PDF needs OCR before Markdown conversion.", "PDF cần OCR trước khi tạo Markdown."),
     "image_needs_ocr": ("This image needs OCR before Markdown conversion.", "Ảnh cần OCR trước khi tạo Markdown."),
     "garbled_needs_ocr": ("This PDF's text looks wrongly encoded and needs OCR again.", "PDF có chữ bị lỗi mã, cần OCR lại."),
+    "needs_office": ("This format needs Microsoft {app}, which is not installed.", "Cần Microsoft {app} để đọc định dạng này."),
     "skipped": ("Skipped", "Bỏ qua"),
     "error": ("Error", "Lỗi"),
     "session_declined": ("Session ended. No files were processed.", "Đã kết thúc phiên; chưa xử lý tệp nào."),

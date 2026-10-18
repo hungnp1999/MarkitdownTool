@@ -13,6 +13,7 @@ import string
 import subprocess
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
 from typing import BinaryIO, Callable, Iterable, Iterator, Sequence
@@ -35,6 +36,7 @@ from document_core import (
     process_batch,
     scan_folder,
 )
+from office_converter import OFFICE_EXTENSIONS
 
 
 # Major version of the JSON contract in schemas/. Adding fields or codes keeps it; removing or
@@ -60,12 +62,23 @@ DEFAULT_LIMITS = {
     "batch_wait_seconds": 300,
 }
 
+# Office can reach the network while it opens a file (ADR-011), so integrations never hand files to it.
+_OFFICE_GUI_ONLY = "Định dạng Office cũ chỉ được chuyển đổi trong ứng dụng MarkitdownTool."
+INTEGRATION_EXTENSIONS = SUPPORTED_EXTENSIONS - set(OFFICE_EXTENSIONS)
+
 _REASON_CODES = {
     "Định dạng này chưa được hỗ trợ.": ("unsupported_format", "This file format is not supported."),
     "PDF cần OCR trước khi tạo Markdown.": ("needs_ocr", "This PDF needs OCR before Markdown conversion."),
     "Ảnh cần OCR trước khi tạo Markdown.": ("needs_ocr", "This image needs OCR before Markdown conversion."),
     "PDF có chữ bị lỗi mã, cần OCR lại.": ("garbled_text", "This PDF's text layer looks wrongly encoded, so it needs OCR."),
     "Tệp không phù hợp với chế độ đã chọn.": ("not_eligible_for_mode", "The file does not apply to the selected mode."),
+    "Cần Microsoft Word để đọc định dạng này.": ("needs_office", "This format needs Microsoft Word, which is not installed."),
+    "Cần Microsoft PowerPoint để đọc định dạng này.": ("needs_office", "This format needs Microsoft PowerPoint, which is not installed."),
+    "Cần Microsoft Excel để đọc định dạng này.": ("needs_office", "This format needs Microsoft Excel, which is not installed."),
+    _OFFICE_GUI_ONLY: (
+        "office_gui_only",
+        "Legacy Office formats are converted only in the MarkitdownTool app, not through the CLI, API or MCP.",
+    ),
 }
 _STAGE_NAMES = {"Bỏ qua": "skipped", "Lỗi": "error", "Hoàn tất": "done"}
 
@@ -332,6 +345,16 @@ def expand_inputs(
     return files
 
 
+def classify_for_integration(path: Path) -> FileClassification:
+    """classify_file, except that legacy Office formats are refused (office_gui_only)."""
+    classification = classify_file(path)
+    if path.suffix.lower() not in OFFICE_EXTENSIONS:
+        return classification
+    return replace(
+        classification, supported=False, needs_ocr=False, markdown_eligible=False, ocr_eligible=False, reason=_OFFICE_GUI_ONLY
+    )
+
+
 def classification_to_dict(classification: FileClassification) -> dict:
     reason_code, reason = _reason(classification.reason)
     return {
@@ -430,7 +453,7 @@ def get_manifest(paths: AppPaths) -> dict:
                 "markdown": True,
                 "ocr": extension == ".pdf" or extension in IMAGE_EXTENSIONS,
             }
-            for extension in sorted(SUPPORTED_EXTENSIONS)
+            for extension in sorted(INTEGRATION_EXTENSIONS)
         ],
         "modes": [mode.value for mode in ProcessingMode],
         "ocr": {
@@ -460,7 +483,7 @@ def get_info(paths: AppPaths) -> dict:
         "version": APP_VERSION,
         "schema_version": SCHEMA_VERSION,
         "repository": f"https://github.com/{GITHUB_REPOSITORY}",
-        "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
+        "supported_extensions": sorted(INTEGRATION_EXTENSIONS),
         "modes": [mode.value for mode in ProcessingMode],
         "default_ocr_languages": config.get("ocr_languages", []),
         "tesseract": find_tesseract(APP_DIR),
@@ -495,7 +518,7 @@ def classify(inputs: Iterable[str | Path], recursive: bool = False, roots: Seque
     files = expand_inputs(inputs, recursive=recursive, roots=roots, limits=integration_limits())
     return {
         "schema_version": SCHEMA_VERSION,
-        "files": [{**classification_to_dict(classify_file(path)), **source_digest(path, roots)} for path in files],
+        "files": [{**classification_to_dict(classify_for_integration(path)), **source_digest(path, roots)} for path in files],
     }
 
 
@@ -538,7 +561,7 @@ def convert(
 
     files = expand_inputs(inputs, recursive=recursive, roots=roots, limits=limits)
     languages = list(languages) if languages else list(read_config().get("ocr_languages", []))
-    classifications = tuple(classify_file(path) for path in files)
+    classifications = tuple(classify_for_integration(path) for path in files)
     if force_ocr:
         classifications = tuple(force_ocr_classification(item) for item in classifications)
     quality = {str(item.path): item.text_quality for item in classifications}

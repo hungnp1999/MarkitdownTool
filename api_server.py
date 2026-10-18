@@ -40,8 +40,16 @@ from pathlib import Path
 
 from app_paths import AppPaths
 from app_runtime import API_TOKEN_FILE, APP_VERSION, load_or_create_api_token
-from document_core import SUPPORTED_EXTENSIONS
-from integration_service import ServiceError, allowed_roots, classify, convert, get_info, get_manifest, list_languages
+from integration_service import (
+    INTEGRATION_EXTENSIONS,
+    ServiceError,
+    allowed_roots,
+    classify,
+    convert,
+    get_info,
+    get_manifest,
+    list_languages,
+)
 
 
 TOKEN_ENV = "MARKITDOWNTOOL_API_TOKEN"
@@ -104,8 +112,8 @@ def _write_uploads(files: object, folder: Path) -> list[Path]:
         if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not isinstance(item.get("content_base64"), str):
             raise ServiceError("invalid_request", f"files[{index}] needs string 'name' and 'content_base64'.")
         name = posixpath.basename(item["name"].replace("\\", "/"))
-        if not name or os.path.splitext(name)[1].lower() not in SUPPORTED_EXTENSIONS:
-            raise ServiceError("unsupported_format", f"files[{index}] must be one of: {', '.join(sorted(SUPPORTED_EXTENSIONS))}.")
+        if not name or os.path.splitext(name)[1].lower() not in INTEGRATION_EXTENSIONS:
+            raise ServiceError("unsupported_format", f"files[{index}] must be one of: {', '.join(sorted(INTEGRATION_EXTENSIONS))}.")
         try:
             content = base64.b64decode(item["content_base64"], validate=True)
         except (binascii.Error, ValueError) as error:

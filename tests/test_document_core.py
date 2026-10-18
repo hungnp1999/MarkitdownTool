@@ -113,6 +113,19 @@ class ClassificationTests(unittest.TestCase):
                 result = classify_file(name)
                 self.assertEqual((result.supported, result.needs_ocr, result.markdown_eligible), (True, False, True))
 
+    def test_legacy_office_formats_need_their_office_app(self):
+        for name, app in (("old.doc", "Word"), ("slides.PPT", "PowerPoint"), ("sheet.ods", "Excel")):
+            for available in (True, False):
+                with self.subTest(name=name, available=available), \
+                        patch("document_core.office_app_available", return_value=available) as check:
+                    result = classify_file(name)
+                    check.assert_called_once_with(app)
+                    self.assertTrue(result.supported)
+                    self.assertFalse(result.needs_ocr)
+                    self.assertEqual(result.markdown_eligible, available)
+                    self.assertFalse(result.ocr_eligible)
+                    self.assertEqual(result.reason, "" if available else f"Cần Microsoft {app} để đọc định dạng này.")
+
     def test_other_formats_are_not_supported(self):
         result = classify_file("archive.zip")
 
