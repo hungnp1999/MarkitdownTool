@@ -57,8 +57,19 @@ See [CHANGELOG.md](CHANGELOG.md) for versioned release notes.
 | EPUB | `.epub` | Directly |
 | Text, Markdown, JSON, XML | `.txt`, `.md`, `.json`, `.xml` | Directly, as text |
 | Images | `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp` | Only through OCR (**OCR only** or **OCR then Markdown**) |
+| Legacy Office, OpenDocument | `.doc`, `.rtf`, `.odt`, `.ppt`, `.odp`, `.ods` | App only, through the installed Microsoft Word, PowerPoint or Excel |
 
-Images without resolution metadata, such as phone photos and screenshots, are OCR-processed at 300 DPI. Transparent images are placed on a white background first. Multi-page TIFF files become multi-page PDFs. Legacy `.doc` and `.ppt` files are not supported yet.
+Images without resolution metadata, such as phone photos and screenshots, are OCR-processed at 300 DPI. Transparent images are placed on a white background first. Multi-page TIFF files become multi-page PDFs.
+
+### Legacy Office and OpenDocument files
+
+The app saves `.doc`, `.rtf` and `.odt` with Word, `.ppt` and `.odp` with PowerPoint, and `.ods` with Excel as `.docx`, `.pptx` or `.xlsx` in a private temporary folder, then converts that copy. Without the matching Office app the file is skipped with "needs Microsoft Word" (or PowerPoint, Excel).
+
+- Office opens the copy read-only with macros force-disabled; macros never run.
+- An Office app that does not respond within 60 seconds is stopped (only the instance MarkitdownTool started) and the file is marked failed.
+- Files downloaded from the internet (Mark-of-the-Web) are skipped and never opened with Office. Use **Properties → Unblock** on a file you trust.
+- The CLI, HTTP API and MCP server do not accept these formats (`reason_code: office_gui_only`).
+- Remaining risk: Office can contact a server named inside a file (an attached template or linked picture) while it opens it, even read-only. A file without Mark-of-the-Web, for example one copied from a USB drive or a network share, can still do this, so only convert files you trust.
 
 ## Wrongly encoded PDF text
 
