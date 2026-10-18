@@ -27,6 +27,7 @@ from document_core import (
 )
 import integration_service
 from integration_service import ServiceError, convert, expand_inputs
+from office_converter import OFFICE_EXTENSIONS
 
 sys.path.insert(0, str(Path(__file__).parent))
 import pdf_samples  # noqa: E402
@@ -650,13 +651,18 @@ class OfficeGuiOnlyTests(TempTree):
         self.assertEqual(item["reason_code"], "office_gui_only")
         markdown.assert_not_called()
 
-    def test_manifest_and_info_leave_office_formats_out(self):
-        extensions = [item["extension"] for item in integration_service.get_manifest(self.paths)["formats"]]
+    def test_manifest_marks_office_formats_app_only_and_info_leaves_them_out(self):
+        with patch("integration_service.office_app_available", side_effect=lambda app: app != "Excel"):
+            manifest = integration_service.get_manifest(self.paths)
+        formats = {item["extension"]: item for item in manifest["formats"]}
         info = integration_service.get_info(self.paths)
-        for extension in (".doc", ".rtf", ".odt", ".ppt", ".odp", ".ods"):
+        for extension, app in OFFICE_EXTENSIONS.items():
             with self.subTest(extension=extension):
-                self.assertNotIn(extension, extensions)
+                self.assertEqual((formats[extension]["interfaces"], formats[extension]["requires"]), (["gui"], app))
                 self.assertNotIn(extension, info["supported_extensions"])
+        self.assertEqual(formats[".docx"]["interfaces"], ["gui", "cli", "api", "mcp"])
+        self.assertNotIn("requires", formats[".docx"])
+        self.assertEqual(manifest["engines"]["office"], {"Excel": False, "PowerPoint": True, "Word": True})
 
     def test_needs_office_reason_codes(self):
         for app in ("Word", "PowerPoint", "Excel"):
