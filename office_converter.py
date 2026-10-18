@@ -2,6 +2,7 @@ import functools
 import logging
 import os
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -40,6 +41,8 @@ _FORCE_DISABLE_MACROS = 3  # msoAutomationSecurityForceDisable
 # A wrong password makes COM raise instead of showing the password dialog.
 _DUMMY_PASSWORD = "x"
 _QUIT_GRACE_SECONDS = 3
+# Normal files take a few seconds; hung instances (password or repair dialogs) never return.
+DEFAULT_OFFICE_TIMEOUT_SECONDS = 60
 
 
 def _system_tool(name: str) -> str:
@@ -223,3 +226,39 @@ def convert_with_office(source: Path, work_dir: Path, on_started: Callable[[int 
         _reap(app, pid)
         pythoncom.CoUninitialize()
     return target
+
+
+def convert_with_timeout(
+    source: Path,
+    work_dir: Path,
+    timeout: float = DEFAULT_OFFICE_TIMEOUT_SECONDS,
+    converter: Callable[..., Path] = convert_with_office,
+) -> Path:
+    """convert_with_office on a worker thread; past timeout, kill that Office instance by PID and raise TimeoutError."""
+    app = OFFICE_EXTENSIONS[source.suffix.lower()]
+    state: dict = {"pid": None, "result": None, "error": None}
+
+    def on_started(pid: int | None) -> None:
+        state["pid"] = pid
+
+    def run() -> None:
+        try:
+            state["result"] = converter(source, work_dir, on_started=on_started)
+        except BaseException as error:  # noqa: BLE001 - re-raised on the calling thread
+            state["error"] = error
+
+    worker = threading.Thread(target=run, name=f"office-{app.lower()}", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        pid = state["pid"]
+        if pid is None:
+            logging.getLogger(__name__).warning("Microsoft %s timed out and its PID is unknown; it was not stopped", app)
+        else:
+            logging.getLogger(__name__).warning("Microsoft %s timed out; killing PID %d", app, pid)
+            kill_process(pid)
+            worker.join(10)
+        raise TimeoutError(f"Microsoft {app} did not respond in time.")
+    if state["error"] is not None:
+        raise state["error"]
+    return state["result"]
