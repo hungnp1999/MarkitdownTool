@@ -44,6 +44,7 @@ from document_core import (
 )
 from i18n import translate
 from integration_service import ALLOWED_ROOTS_ENV
+from office_converter import OFFICE_EXTENSIONS
 from language_manager import (
     install_language,
     list_language_packages,
@@ -131,6 +132,9 @@ class MarkitdownApp:
             return self.t("garbled_needs_ocr")
         if reason == "Định dạng này chưa được hỗ trợ.":
             return self.t("skipped_format")
+        for app in set(OFFICE_EXTENSIONS.values()):
+            if reason == translate("needs_office", "vi", app=app):
+                return self.t("needs_office", app=app)
         return reason
 
     def _translate_stage(self, stage: str) -> str:

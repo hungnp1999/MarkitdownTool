@@ -543,6 +543,10 @@ class ApiTests(TempTree):
         status, body = self.request("POST", "/v1/convert", {"files": [{"name": "x.exe", "content_base64": ""}]})
         self.assertEqual((status, body["error"]["code"]), (400, "unsupported_format"))
 
+    def test_office_upload_is_rejected(self):
+        status, body = self.request("POST", "/v1/convert", {"files": [{"name": "old.doc", "content_base64": ""}]})
+        self.assertEqual((status, body["error"]["code"]), (400, "unsupported_format"))
+
     def raw_request(self, path, data=b"{}", headers=None):
         request = urllib.request.Request(self.base + path, data=data, method="POST", headers=headers or {})
         try:
@@ -619,6 +623,47 @@ class ApiTests(TempTree):
     def test_unknown_route_and_wrong_method(self):
         self.assertEqual(self.request("GET", "/v1/nope")[0], 404)
         self.assertEqual(self.request("GET", "/v1/convert")[0], 405)
+
+
+class OfficeGuiOnlyTests(TempTree):
+    """ADR-011: Office can reach the network while it opens a file, so integrations never use it."""
+
+    def setUp(self):
+        super().setUp()
+        office = patch("document_core.office_app_available", return_value=True)
+        office.start()
+        self.addCleanup(office.stop)
+        self.source = self.root / "old.doc"
+        self.source.write_bytes(b"x")
+
+    def test_classify_refuses_office_formats_even_when_office_is_installed(self):
+        item = integration_service.classify([self.source])["files"][0]
+        self.assertFalse(item["supported"])
+        self.assertFalse(item["markdown_eligible"])
+        self.assertEqual(item["reason_code"], "office_gui_only")
+
+    def test_convert_skips_office_formats(self):
+        with patch("document_core.convert_markdown") as markdown:
+            result = convert([self.source], self.paths, mode="markdown", output_dir=str(self.root / "out"))
+        item = result["files"][0]
+        self.assertEqual(item["status"], "skipped")
+        self.assertEqual(item["reason_code"], "office_gui_only")
+        markdown.assert_not_called()
+
+    def test_manifest_and_info_leave_office_formats_out(self):
+        extensions = [item["extension"] for item in integration_service.get_manifest(self.paths)["formats"]]
+        info = integration_service.get_info(self.paths)
+        for extension in (".doc", ".rtf", ".odt", ".ppt", ".odp", ".ods"):
+            with self.subTest(extension=extension):
+                self.assertNotIn(extension, extensions)
+                self.assertNotIn(extension, info["supported_extensions"])
+
+    def test_needs_office_reason_codes(self):
+        for app in ("Word", "PowerPoint", "Excel"):
+            with self.subTest(app=app):
+                code, message = integration_service._reason(f"Cần Microsoft {app} để đọc định dạng này.")
+                self.assertEqual(code, "needs_office")
+                self.assertIn(f"Microsoft {app}", message)
 
 
 class ApiBindingTests(unittest.TestCase):

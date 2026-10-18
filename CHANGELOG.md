@@ -8,6 +8,10 @@ Notable changes to MarkitdownTool are listed here by release.
 
 - HTML (`.html`, `.htm`), EPUB (`.epub`), plain text (`.txt`), Markdown (`.md`), JSON (`.json`), and XML (`.xml`) files convert to Markdown in the app, CLI, API, and MCP server. Remote images in HTML are kept as links and never downloaded (#11).
 
+### Changed
+
+- The CLI, HTTP API, and MCP server report legacy Office and OpenDocument files (`.doc`, `.rtf`, `.odt`, `.ppt`, `.odp`, `.ods`) with `reason_code: office_gui_only` instead of `unsupported_format`. These formats will be converted only in the app, through Microsoft Office, because Office can reach the network while it opens a file (ADR-011, #11). Without the matching Office app the app reports them with `needs_office`.
+
 ## [2.3.0] - 2026-10-17
 
 ### Added

@@ -13,6 +13,8 @@ from pathlib import Path
 from threading import Event
 from typing import BinaryIO, Callable, ContextManager, Iterable, Iterator
 
+from office_converter import OFFICE_EXTENSIONS, office_app_available
+
 
 DOCUMENT_EXTENSIONS = {
     ".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".csv",
@@ -20,7 +22,7 @@ DOCUMENT_EXTENSIONS = {
 }
 # Images have no text layer, so they always go through OCR (image -> searchable PDF -> Markdown).
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
-SUPPORTED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
+SUPPORTED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS | set(OFFICE_EXTENSIONS)
 # Used when an image has no usable resolution metadata; OCRmyPDF refuses such images otherwise.
 DEFAULT_IMAGE_DPI = 300
 # Pages whose share of correctly encoded words is below this are OCRed again (force OCR).
@@ -226,9 +228,13 @@ def classify_file(file_path: str | Path) -> FileClassification:
     report = analyze_pdf_text(path) if extension == ".pdf" else PdfTextReport(True)
     garbled = bool(report.low_quality_pages)
     needs_ocr = is_image or not report.readable or bool(report.empty_pages) or garbled
+    office_app = OFFICE_EXTENSIONS.get(extension)
+    office_missing = bool(office_app) and not office_app_available(office_app)
 
     if not supported:
         reason = "Định dạng này chưa được hỗ trợ."
+    elif office_missing:
+        reason = f"Cần Microsoft {office_app} để đọc định dạng này."
     elif is_image:
         reason = "Ảnh cần OCR trước khi tạo Markdown."
     elif garbled:
@@ -242,7 +248,7 @@ def classify_file(file_path: str | Path) -> FileClassification:
         path=path,
         supported=supported,
         needs_ocr=needs_ocr,
-        markdown_eligible=supported and not needs_ocr,
+        markdown_eligible=supported and not needs_ocr and not office_missing,
         ocr_eligible=needs_ocr,
         reason=reason,
         text_quality=report.text_quality,
