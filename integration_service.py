@@ -36,7 +36,7 @@ from document_core import (
     process_batch,
     scan_folder,
 )
-from office_converter import OFFICE_EXTENSIONS
+from office_converter import OFFICE_EXTENSIONS, office_app_available
 
 
 # Major version of the JSON contract in schemas/. Adding fields or codes keeps it; removing or
@@ -65,6 +65,8 @@ DEFAULT_LIMITS = {
 # Office can reach the network while it opens a file (ADR-011), so integrations never hand files to it.
 _OFFICE_GUI_ONLY = "Định dạng Office cũ chỉ được chuyển đổi trong ứng dụng MarkitdownTool."
 INTEGRATION_EXTENSIONS = SUPPORTED_EXTENSIONS - set(OFFICE_EXTENSIONS)
+_ALL_INTERFACES = ("gui", "cli", "api", "mcp")
+_GUI_ONLY_INTERFACES = ("gui",)
 
 _REASON_CODES = {
     "Định dạng này chưa được hỗ trợ.": ("unsupported_format", "This file format is not supported."),
@@ -452,8 +454,10 @@ def get_manifest(paths: AppPaths) -> dict:
                 "kind": "image" if extension in IMAGE_EXTENSIONS else "document",
                 "markdown": True,
                 "ocr": extension == ".pdf" or extension in IMAGE_EXTENSIONS,
+                "interfaces": list(_GUI_ONLY_INTERFACES if extension in OFFICE_EXTENSIONS else _ALL_INTERFACES),
             }
-            for extension in sorted(INTEGRATION_EXTENSIONS)
+            | ({"requires": OFFICE_EXTENSIONS[extension]} if extension in OFFICE_EXTENSIONS else {})
+            for extension in sorted(SUPPORTED_EXTENSIONS)
         ],
         "modes": [mode.value for mode in ProcessingMode],
         "ocr": {
@@ -467,6 +471,7 @@ def get_manifest(paths: AppPaths) -> dict:
             "ocrmypdf": _package_version("ocrmypdf"),
             "pypdfium2": _package_version("pypdfium2"),
             "tesseract": _tesseract_version(tesseract),
+            "office": {app: office_app_available(app) for app in sorted(set(OFFICE_EXTENSIONS.values()))},
         },
         "reason_codes": sorted({code for code, _message in _REASON_CODES.values()}),
         "text_quality_threshold": TEXT_QUALITY_THRESHOLD,
