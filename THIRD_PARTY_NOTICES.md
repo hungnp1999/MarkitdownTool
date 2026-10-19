@@ -101,6 +101,52 @@ https://github.com/tesseract-ocr/tesseract
 
 ---
 
+## pikepdf and QPDF
+
+pikepdf: MPL 2.0. QPDF: Apache License 2.0.
+
+Repositories:
+https://github.com/pikepdf/pikepdf
+https://github.com/qpdf/qpdf
+
+OCRmyPDF uses pikepdf, which includes the QPDF library, to read and write PDF files.
+
+## fpdf2
+
+License: GNU Lesser General Public License v3.0 (LGPL-3.0-only)
+
+Repository:
+https://github.com/py-pdf/fpdf2
+
+## img2pdf
+
+License: GNU Lesser General Public License v3.0 (LGPL-3.0-or-later)
+
+Repository:
+https://gitlab.mister-muffin.de/josch/img2pdf
+
+OCRmyPDF uses fpdf2 to render the OCR text layer and img2pdf to turn images into PDF pages. Both are included unmodified as Python modules inside `markitdown_gui.exe` and `markitdowntool.exe`. The texts of the GNU LGPL v3 and the GNU GPL v3 it builds on are included as `licenses/LGPL-3.0.txt` and `licenses/GPL-3.0.txt` (in the installation folder, and inside each executable).
+
+You may replace these libraries with your own versions. The complete source code of MarkitdownTool and the build script are available at https://github.com/hungnp1999/MarkitdownTool: install your version of the library with `pip` and run MarkitdownTool from source, or rebuild the executables with `markitdown_gui.spec`. The source code of each library is available from its repository above.
+
+## certifi
+
+License: MPL 2.0
+
+Repository:
+https://github.com/certifi/python-certifi
+
+## PyInstaller
+
+License: GNU General Public License v2.0 with the PyInstaller bootloader exception
+
+Repository:
+https://github.com/pyinstaller/pyinstaller
+
+The executables are built with PyInstaller. Its bootloader exception allows distributing the built executables under any license.
+
+---
+
 ## Python
 
 License: Python Software Foundation License
