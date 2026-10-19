@@ -351,6 +351,8 @@ class BatchProcessingTests(unittest.TestCase):
                 run_ocr(source, ["eng"], self.ocr_dir, self.project_dir, force_pages=force_pages)
             options = {key: ocr.call_args.kwargs.get(key) for key in ("skip_text", "force_ocr", "pages")}
             self.assertEqual({key: value for key, value in options.items() if value is not None}, expected)
+            self.assertEqual(ocr.call_args.kwargs["pdfa_backend"], "internal")
+            self.assertEqual(ocr.call_args.kwargs["rasterizer"], "pypdfium")
 
     def test_open_source_stream_is_passed_to_the_converter(self):
         source = self.project_dir / "report.docx"
