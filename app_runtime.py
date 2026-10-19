@@ -10,7 +10,7 @@ from pathlib import Path
 from app_paths import AppPaths, build_app_paths, copy_data_preserving_existing, local_app_data, migrate_legacy_config
 
 
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 GITHUB_REPOSITORY = "hungnp1999/MarkitdownTool"
 IS_FROZEN = getattr(sys, "frozen", False)
 APP_DIR = Path(sys.executable).parent if IS_FROZEN else Path(__file__).parent
