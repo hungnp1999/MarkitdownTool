@@ -2,9 +2,9 @@
 
 Notable changes to MarkitdownTool are listed here by release.
 
-## [Unreleased]
+## [2.4.0] - 2026-10-19
 
-Version 2.3.0 was prepared but never published. Its changes, listed under [2.3.0] below, ship for the first time in this release.
+Version 2.3.0 was prepared but never published. Its changes, listed under [2.3.0] below, ship for the first time in 2.4.0.
 
 ### Added
 
