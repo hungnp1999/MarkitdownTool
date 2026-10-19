@@ -476,6 +476,9 @@ def run_ocr(
                     rotate_pages=True,
                     progress_bar=False,
                     use_threads=os.name == "nt",
+                    # Never call a Ghostscript (AGPL) the user happens to have installed.
+                    pdfa_backend="internal",
+                    rasterizer="pypdfium",
                     **text_options,
                     **image_options,
                 )
