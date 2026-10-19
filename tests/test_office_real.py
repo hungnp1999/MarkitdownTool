@@ -68,9 +68,19 @@ class RealOfficeConversionTests(OfficeFixtureTest):
     def test_ods(self):
         self.assertIn("Cân điện tử", self.convert(".ods"))
 
-    @unittest.skip("needs a Word fixture with an AutoOpen macro, which requires VBA project access to create; spike check 6")
     def test_auto_open_macro_does_not_run(self):
-        pass
+        if not office_app_available("Word"):
+            self.skipTest("needs Microsoft Word")
+        # The fixture's AutoOpen macro creates this file when Word runs it.
+        marker = Path(os.environ.get("TEMP", tempfile.gettempdir())) / "mdt_macro_ran.txt"
+        marker.unlink(missing_ok=True)
+        self.addCleanup(marker.unlink, missing_ok=True)
+        source = self.root / "macro.doc"
+        shutil.copyfile(FIXTURES / "macro_autoopen.doc", source)
+        item = self.run_gui_batch(source).files[0]
+        self.assertEqual(item.status, FileStatus.SUCCESS, item.message)
+        self.assertIn("macro AutoOpen", item.outputs[0].read_text(encoding="utf-8"))
+        self.assertFalse(marker.exists(), "the AutoOpen macro ran")
 
 
 class OfficeSafetyTests(OfficeFixtureTest):
