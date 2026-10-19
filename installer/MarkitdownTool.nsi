@@ -66,6 +66,10 @@ Section "${PRODUCT_NAME} application" MainSection
   File "${ROOT_DIR}\THIRD_PARTY_NOTICES.md"
   File "${ROOT_DIR}\README.md"
 
+  SetOutPath "$INSTDIR\licenses"
+  File "${ROOT_DIR}\licenses\GPL-3.0.txt"
+  File "${ROOT_DIR}\licenses\LGPL-3.0.txt"
+
   SetOutPath "$INSTDIR\licenses\pypdfium2"
   File /r "${ROOT_DIR}\build\installer_payload\pypdfium2_licenses\*"
 
@@ -126,6 +130,8 @@ Section un.RemoveApplication "Remove ${PRODUCT_NAME} application"
   Delete "$INSTDIR\PRIVACY.md"
   Delete "$INSTDIR\THIRD_PARTY_NOTICES.md"
   Delete "$INSTDIR\README.md"
+  Delete "$INSTDIR\licenses\GPL-3.0.txt"
+  Delete "$INSTDIR\licenses\LGPL-3.0.txt"
   RMDir /r "$INSTDIR\licenses\pypdfium2"
   RMDir "$INSTDIR\licenses"
   Delete "$INSTDIR\uninstall.exe"

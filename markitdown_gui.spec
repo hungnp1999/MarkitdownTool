@@ -20,6 +20,7 @@ datas += [
     (str(SPEC_DIR / filename), ".")
     for filename in ("LICENSE.md", "DISCLAIMER.md", "PRIVACY.md", "THIRD_PARTY_NOTICES.md", "README.md")
 ]
+datas += [(str(SPEC_DIR / "licenses" / filename), "licenses") for filename in ("GPL-3.0.txt", "LGPL-3.0.txt")]
 
 
 a = Analysis(

@@ -4,6 +4,8 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ## [Unreleased]
 
+Version 2.3.0 was prepared but never published. Its changes, listed under [2.3.0] below, ship for the first time in this release.
+
 ### Added
 
 - HTML (`.html`, `.htm`), EPUB (`.epub`), plain text (`.txt`), Markdown (`.md`), JSON (`.json`), and XML (`.xml`) files convert to Markdown in the app, CLI, API, and MCP server. Remote images in HTML are kept as links and never downloaded (#11).
@@ -16,7 +18,11 @@ Notable changes to MarkitdownTool are listed here by release.
 - The CLI, HTTP API, and MCP server report legacy Office and OpenDocument files (`.doc`, `.rtf`, `.odt`, `.ppt`, `.odp`, `.ods`) with `reason_code: office_gui_only` instead of `unsupported_format`. These formats will be converted only in the app, through Microsoft Office, because Office can reach the network while it opens a file (ADR-011, #11). Without the matching Office app the app reports them with `needs_office`.
 - `manifest` formats now carry `interfaces` (where each format can be converted). Legacy Office formats are listed with `"interfaces": ["gui"]` and `requires` (`Word`, `PowerPoint` or `Excel`), and `engines.office` reports which Office apps are installed (#30).
 
-## [2.3.0] - 2026-10-17
+### Fixed
+
+- `THIRD_PARTY_NOTICES.md` now lists the libraries that the executables include through OCRmyPDF: fpdf2 and img2pdf (LGPL-3.0), pikepdf with QPDF, certifi, and PyInstaller. The GNU LGPL v3 and GPL v3 texts ship in the installer's `licenses` folder and inside each executable.
+
+## [2.3.0] - not released
 
 ### Added
 
