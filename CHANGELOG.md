@@ -4,6 +4,10 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ## [Unreleased]
 
+### Added
+
+- Claude Code cloud sessions install the dependencies into `.venv` at start (`.claude/hooks/session-start.sh`); the hook does nothing on local machines.
+
 ### Changed
 
 - OCR never uses Ghostscript, even when it is installed: PDF pages are rasterized with pypdfium2 and PDF/A is produced by OCRmyPDF's internal backend (a regular PDF when that is not possible). Output no longer depends on whether the machine has Ghostscript.
