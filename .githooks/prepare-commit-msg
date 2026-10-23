@@ -1,0 +1,10 @@
+#!/bin/sh
+# Add the Dev-Environment trailer (docs/DEVELOPMENT_PROVENANCE.md).
+# Label: $DEV_ENVIRONMENT if set, "cloud" in Claude Code cloud sessions.
+label="${DEV_ENVIRONMENT:-}"
+if [ -z "$label" ] && [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  label=cloud
+fi
+[ -n "$label" ] || exit 0
+git interpret-trailers --in-place --if-exists doNothing \
+  --trailer "Dev-Environment: $label" "$1"
