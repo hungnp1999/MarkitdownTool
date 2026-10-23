@@ -28,6 +28,12 @@ Guidance for Claude Code sessions working on MarkitdownTool. Keep this file shor
 - UNC/WebDAV/device paths must be refused before any I/O (NTLM leak).
 - Open security follow-ups: issues #6–#9.
 
+## Provenance
+
+- Git and PR operations only in an environment listed in `docs/DEVELOPMENT_PROVENANCE.md` (`cloud`, `pc-01`); never on an employer-owned device.
+- Every commit ends with `Dev-Environment: <label>`; `.githooks/prepare-commit-msg` adds it once the SessionStart hook has run. Cloud commits also keep `Claude-Session:`. The `Provenance` workflow fails a PR otherwise.
+- Merging through the API: put `Dev-Environment:` and `Claude-Session:` in the merge or squash commit message.
+
 ## Commands (Windows, run from the repo root)
 
 ```powershell
