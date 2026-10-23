@@ -21,7 +21,7 @@ The rules follow common open-source practice:
 | Label | Environment | Signing | Allowed since |
 | --- | --- | --- | --- |
 | `cloud` | Claude Code on the web: an ephemeral container hosted by Anthropic, one per session. The `Claude-Session` trailer links the session. | SSH signature added by the Claude Code session | 2026-10-23 |
-| `pc-01` | The owner's personal desktop computer (Windows), used directly and through Claude Code. | SSH signing key of the device (being set up) | 2026-10-23 |
+| `pc-01` | The owner's personal desktop computer (Windows), used directly and through Claude Code. | SSH signing key of the device, registered on GitHub | 2026-10-23 |
 
 Labels do not identify hardware or people. The owner keeps the mapping from label to physical device in a private register outside this repository.
 
@@ -46,7 +46,7 @@ Then add the `.pub` file on GitHub under Settings, SSH and GPG keys, as a **Sign
 
 ## Checks
 
-The `Provenance` workflow runs on every pull request. It fails when a commit has no `Dev-Environment` trailer, names an environment that is not listed, or is a cloud commit without `Claude-Session`. Commits by bots such as Dependabot are skipped. It also warns about commits that GitHub does not show as verified; the warning becomes an error once every environment signs.
+The `Provenance` workflow runs on every pull request. It fails when a commit has no `Dev-Environment` trailer, names an environment that is not listed, or is a cloud commit without `Claude-Session`. Commits by bots such as Dependabot are skipped. It also fails when GitHub does not show a commit as verified, that is, signed with a key registered on GitHub.
 
 To read the record locally:
 

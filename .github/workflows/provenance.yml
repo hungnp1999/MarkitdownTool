@@ -18,17 +18,19 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bash .github/scripts/check-provenance.sh "$BASE_SHA" "$HEAD_SHA"
-      - name: Commit signatures (warning only until every environment signs)
+      - name: Every commit is signed with a key verified by GitHub
         env:
           GH_TOKEN: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          fail=0
           for sha in $(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA"); do
             verified=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq .commit.verification.verified)
             if [ "$verified" = true ]; then
               echo "signed $sha"
             else
-              echo "::warning::$sha is not signed with a key verified by GitHub"
+              echo "::error::$sha is not signed with a key verified by GitHub"; fail=1
             fi
           done
+          exit "$fail"
