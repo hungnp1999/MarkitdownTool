@@ -6,7 +6,7 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ### Added
 
-- Development provenance (`docs/DEVELOPMENT_PROVENANCE.md`): every commit carries a `Dev-Environment` trailer naming an allowed environment (`cloud` or `pc-01`), added by `.githooks/prepare-commit-msg`; the new `Provenance` workflow fails a pull request otherwise and warns about unsigned commits. New pull request template with a development environment section.
+- Development provenance (`docs/DEVELOPMENT_PROVENANCE.md`): every commit carries a `Dev-Environment` trailer naming an allowed environment (`cloud` or `pc-01`), added by `.githooks/prepare-commit-msg`; the new `Provenance` workflow fails a pull request otherwise or when a commit is not signed with a key verified by GitHub. New pull request template with a development environment section.
 - Claude Code cloud sessions install the dependencies into `.venv` at start (`.claude/hooks/session-start.sh`); the hook does nothing on local machines.
 
 ### Changed
