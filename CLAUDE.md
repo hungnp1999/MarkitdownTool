@@ -10,6 +10,8 @@ Guidance for Claude Code sessions working on MarkitdownTool. Keep this file shor
 
 ## Architecture
 
+Module map, main flows and invariants: `ARCHITECTURE.md` (update it in the same PR when they change).
+
 | Module | Role |
 | --- | --- |
 | `document_core.py` | Core pipeline: `classify_file`, `collect_supported_files`, `run_ocr` (OCRmyPDF + Tesseract), `convert_markdown` (MarkItDown), `process_batch`. `SUPPORTED_EXTENSIONS` gates every interface. |
@@ -58,9 +60,11 @@ Guidance for Claude Code sessions working on MarkitdownTool. Keep this file shor
 1. Branch from up-to-date `main`: `feature/*`, `fix/*`, `docs/*`.
 2. Update `CHANGELOG.md` (an `[Unreleased]` section until release) and README when behaviour changes.
 3. Run the full test suite; for interface changes also smoke-test the CLI/API/MCP.
+   Before merging a code PR that touches `integration_service.py`, the CLI/API/MCP interfaces, `office_converter.py`, subprocess or network calls, or `.claude/`, run `/security-review` and fix or answer its findings. Docs-only PRs skip it.
 4. Open a PR with `gh pr create --body-file ...`; the maintainer approves merges.
 5. CodeQL (default setup) on a PR only reports alerts on changed lines. After merging, confirm the `main` analysis of the merge commit with the `codeql-verify` skill (`.claude/skills/codeql-verify/`).
-6. Release (step by step in the `release` skill, `.claude/skills/release/`): bump `APP_VERSION` (`app_runtime.py`), `PRODUCT_VERSION`/`VIProductVersion` (`installer/MarkitdownTool.nsi`) and the README title; build from `main`; smoke-test `dist\markitdowntool.exe`; `gh release create vX.Y.Z` with `MarkitdownTool-Setup.exe`, `markitdown_gui.exe`, `markitdowntool.exe` and their SHA-256 in the notes.
+6. Before each release and after a large refactor, redraw the architecture diagram (Artifact page) and note any drift from `ARCHITECTURE.md`.
+7. Release (step by step in the `release` skill, `.claude/skills/release/`): bump `APP_VERSION` (`app_runtime.py`), `PRODUCT_VERSION`/`VIProductVersion` (`installer/MarkitdownTool.nsi`) and the README title; build from `main`; smoke-test `dist\markitdowntool.exe`; `gh release create vX.Y.Z` with `MarkitdownTool-Setup.exe`, `markitdown_gui.exe`, `markitdowntool.exe` and their SHA-256 in the notes.
 
 ## Backlog
 
