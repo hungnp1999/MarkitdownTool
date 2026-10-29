@@ -11,7 +11,7 @@ The rules follow common open-source practice:
 ## Rules
 
 1. Git and pull request operations (commit, push, opening, reviewing and merging pull requests, releases) happen only in an environment listed below. Employer-owned devices are never used. Reading and commenting on GitHub in a browser creates no commit and is allowed from any device.
-2. Every commit ends with a `Dev-Environment: <label>` trailer. Commits made in a Claude Code cloud session also keep their `Claude-Session: <url>` trailer, and commits written with an AI assistant keep their `Co-Authored-By:` trailer.
+2. Every commit ends with a `Dev-Environment: <label>` trailer. Commits made in a Claude Code cloud session also keep their `Claude-Session: <url>` trailer, and commits written with an AI assistant keep their `Co-Authored-By:` trailer. Commits written by an AI agent outside Claude Code (Google Antigravity, branches `ag/*`) are made on a listed environment, signed with its key, and add `AI-Agent: antigravity/<model>`.
 3. Commits are signed with a key registered on GitHub for that environment.
 4. Pull requests fill in the "Development environment" section of the template.
 5. A merge or squash through the GitHub API keeps the trailers of the merged commits and adds those of the environment that performed the merge. GitHub signs the merge commit itself.
