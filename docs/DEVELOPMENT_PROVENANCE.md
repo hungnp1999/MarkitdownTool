@@ -21,7 +21,7 @@ The rules follow common open-source practice:
 | Label | Environment | Signing | Allowed since |
 | --- | --- | --- | --- |
 | `cloud` | Claude Code on the web: an ephemeral container hosted by Anthropic, one per session. The `Claude-Session` trailer links the session. | SSH signature added by the Claude Code session | 2026-10-23 |
-| `pc-01` | The owner's personal desktop computer (Windows), used directly and through Claude Code. | SSH signing key of the device, registered on GitHub | 2026-10-23 |
+| `pc-01` | The owner's personal desktop computer (Windows), used directly and through Claude Code. | SSH signing key of the device, registered on GitHub; since 2026-10-30 a second key for the standard account that AI agents run under (lfmap ADR-023), same label | 2026-10-23 |
 
 Labels do not identify hardware or people. The owner keeps the mapping from label to physical device in a private register outside this repository.
 
