@@ -1,4 +1,4 @@
-markitdown[all]==0.1.8
+markitdown[all]==0.1.9
 ocrmypdf==17.13.0
 pdfplumber==0.11.10
 pypdfium2==5.14.0
