@@ -35,7 +35,7 @@ gh pr view N --json number,title,state,isDraft,reviewDecision,mergeable,headRefN
 gh pr checks N
 ```
 
-A PR is ready when it is open, not a draft, `mergeable` is `MERGEABLE` and the checks have passed (`Security scan` and `Provenance`). `reviewDecision` may be empty because the maintainer approves merges in chat; that's fine. → **Stop point 1.** Then merge the way earlier PRs were merged (merge commits):
+A PR is ready when it is open, not a draft, `mergeable` is `MERGEABLE` and the checks have passed (CodeQL included). `reviewDecision` may be empty because the maintainer approves merges in chat; that's fine. → **Stop point 1.** Then merge the way earlier PRs were merged (merge commits):
 
 ```powershell
 gh pr merge N --merge --delete-branch
@@ -140,7 +140,7 @@ gh release edit vX.Y.Z --draft=false --latest
 
 - Report in Vietnamese: version, release URL, tag commit, the three hashes, smoke test result.
 - Remind the maintainer that new PRs start a fresh `## [Unreleased]` section in `CHANGELOG.md`.
-- If the release contains security fixes, check that the `Security scan` run on `main` is green and that `/security-review` was done for the PR (CodeQL is not used, lfmap #346).
+- If the release contains security fixes, check the `main` CodeQL analysis: `gh api "repos/hungnp1999/MarkitdownTool/code-scanning/alerts?state=open" --jq length`.
 
 ## Rebuilding the assets of a published release
 

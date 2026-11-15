@@ -58,4 +58,4 @@ flowchart LR
 ## Review habits
 
 - Redraw the diagram above (or a richer one as an Artifact page) before each release and after a large refactor; note any drift from this file in the PR.
-- Run `/security-review` before merging a code PR that touches `integration_service.py`, the API, MCP or CLI interfaces, `office_converter.py`, subprocess calls, network calls or `.claude/`. The `Security scan` workflow runs ruff `S` rules on every PR (CodeQL is not used on private repos, lfmap #346).
+- Run `/security-review` before merging a code PR that touches `integration_service.py`, the API, MCP or CLI interfaces, `office_converter.py`, subprocess calls, network calls or `.claude/`. CodeQL runs while the repo is public; the `Security scan` (ruff `S`) and `Secret scan` workflows run on every PR and are the only scanners if the repo goes private (lfmap #346).
