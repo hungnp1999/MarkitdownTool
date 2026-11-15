@@ -5,6 +5,8 @@ description: Verify MarkitdownTool's CodeQL code scanning - the analysis on a pu
 
 # Verify CodeQL on a PR and on main
 
+> **Retired 2026-11-15.** The repository is private and GitHub Code Security is paid, so code scanning is switched off (lfmap #346). Do not use this skill for new checks. Use the `Security scan` workflow (ruff `S` rules) and `/security-review` instead. The text below is kept as history.
+
 MarkitdownTool uses GitHub code scanning **default setup** (Python, `default` suite, weekly schedule plus every push and PR). The trap this skill exists for: **a PR's CodeQL check only reports alerts on the lines the PR changed.** A green "CodeQL: No new alerts in code changed by this pull request" doesn't mean `main` stays clean after the merge. PR #5 is the real example: its PR analysis had 0 results, and the analysis of its merge commit on `main` immediately raised 8 high-severity `py/path-injection` alerts in `document_core.py`, a file the PR did not touch. So the check is not done until the analysis of the **merge commit on main** is in.
 
 Talk to the maintainer in Vietnamese. Everything here is read-only. Dismissing an alert, re-running a workflow or changing code-scanning settings changes the repository's security record, so do those only after the maintainer says yes to that specific action.

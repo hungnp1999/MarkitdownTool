@@ -1,0 +1,16 @@
+# Security lint only (bandit-style rules). CodeQL is not used: the repository is private
+# and GitHub Code Security is paid (lfmap issue #346).
+target-version = "py312"
+extend-exclude = ["build", "dist", "installer"]
+
+[lint]
+select = ["S"]
+ignore = [
+    "S101",  # assert is the test idiom and an internal invariant check
+    "S603",  # subprocess with a list argv and no shell; covered by /security-review
+    "S607",  # partial executable path; same review as S603
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S"]
+"scripts/**" = ["S"]

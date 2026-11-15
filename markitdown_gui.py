@@ -468,7 +468,7 @@ class MarkitdownApp:
                     headers={"Accept": "application/vnd.github+json", "User-Agent": "MarkitdownTool"},
                 )
                 try:
-                    with urllib.request.urlopen(request, timeout=15) as response:
+                    with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 - fixed https URL
                         release = json.loads(response.read().decode("utf-8"))
                     self.root.after(0, lambda: show_release(release))
                 except Exception as error:
@@ -556,7 +556,7 @@ class MarkitdownApp:
             messagebox.showerror(self.t("about"), self.t("legal_file_missing", filename=filename), parent=parent)
             return
         try:
-            os.startfile(str(path))
+            os.startfile(str(path))  # noqa: S606 - opens a bundled or user-chosen file with its default app
         except Exception as error:
             messagebox.showerror(self.t("cannot_open_folder"), str(error), parent=parent)
 
@@ -1158,7 +1158,7 @@ class MarkitdownApp:
 
     def _open_location(self, path: Path) -> None:
         try:
-            os.startfile(str(path))
+            os.startfile(str(path))  # noqa: S606 - opens a bundled or user-chosen file with its default app
         except Exception as error:
             messagebox.showerror(self.t("cannot_open_folder"), str(error), parent=self.root)
 

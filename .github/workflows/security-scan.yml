@@ -1,0 +1,24 @@
+name: Security scan
+
+# Free replacement for CodeQL, which needs paid GitHub Code Security on a private repository
+# (lfmap issue #346). Bandit-style `S` rules from ruff; see ruff.toml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ruff-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install ruff==0.16.9
+      - name: Ruff security rules (S)
+        run: ruff check --output-format github .

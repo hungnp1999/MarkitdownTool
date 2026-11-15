@@ -66,7 +66,7 @@ _SAVE_FORMATS = {"Word": (12, ".docx"), "PowerPoint": (24, ".pptx"), "Excel": (5
 _EXECUTABLES = {"Word": "WINWORD.EXE", "PowerPoint": "POWERPNT.EXE", "Excel": "EXCEL.EXE"}
 _FORCE_DISABLE_MACROS = 3  # msoAutomationSecurityForceDisable
 # A wrong password makes COM raise instead of showing the password dialog.
-_DUMMY_PASSWORD = "x"
+_DUMMY_PASSWORD = "x"  # noqa: S105 - forces a COM error instead of a dialog
 _QUIT_GRACE_SECONDS = 3
 # Normal files take a few seconds; hung instances (password or repair dialogs) never return.
 DEFAULT_OFFICE_TIMEOUT_SECONDS = 60
@@ -119,7 +119,7 @@ def find_instance_pid(app: str, instance, before: set[int]) -> int | None:
             hwnd = instance.Hwnd
         if hwnd:
             return win32process.GetWindowThreadProcessId(hwnd)[1]
-    except Exception:  # noqa: BLE001 - fall back to the process list
+    except Exception:  # noqa: BLE001, S110 - fall back to the process list
         pass
     # PowerPoint has no usable window handle when hidden; two new processes mean another start raced this one.
     new = _office_pids(app) - before

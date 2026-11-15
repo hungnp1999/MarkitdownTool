@@ -4,6 +4,10 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ## [Unreleased]
 
+### Changed
+
+- Security scanning: CodeQL is replaced by the free `Security scan` workflow (ruff `S` rules, `ruff.toml`) plus a mandatory `/security-review` for sensitive paths, because the repository is private and GitHub Code Security is paid (lfmap #346). A few justified `noqa: S...` comments were added; behaviour is unchanged.
+
 ### Added
 
 - `docs/DEVELOPMENT_PROVENANCE.md`: `pc-01` also covers a second signing key, for the standard Windows account that AI agents run under (lfmap ADR-023).

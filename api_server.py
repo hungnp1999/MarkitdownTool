@@ -52,7 +52,7 @@ from integration_service import (
 )
 
 
-TOKEN_ENV = "MARKITDOWNTOOL_API_TOKEN"
+TOKEN_ENV = "MARKITDOWNTOOL_API_TOKEN"  # noqa: S105 - an environment variable name
 MAX_BODY_BYTES = 200 * 1024 * 1024
 
 _ERROR_STATUS = {
