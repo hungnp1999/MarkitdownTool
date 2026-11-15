@@ -4,6 +4,11 @@ Notable changes to MarkitdownTool are listed here by release.
 
 ## [Unreleased]
 
+### Changed
+
+- `Secret scan` workflow (gitleaks 8.30.1, binary pinned by SHA-256) replaces GitHub secret scanning, which is paid on private repositories (lfmap #346).
+- Security scanning: the free `Security scan` workflow (ruff `S` rules, `ruff.toml`) plus a mandatory `/security-review` for sensitive paths, as insurance for when the repository goes private (GitHub Code Security is paid, lfmap #346); CodeQL stays while it is public. A few justified `noqa: S...` comments were added; behaviour is unchanged.
+
 ### Added
 
 - `docs/DEVELOPMENT_PROVENANCE.md`: `pc-01` also covers a second signing key, for the standard Windows account that AI agents run under (lfmap ADR-023).

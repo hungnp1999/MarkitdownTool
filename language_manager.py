@@ -93,13 +93,13 @@ def install_language(code: str, project_dir: Path, data_dir: Path | None = None)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{code}.traineddata"
     temporary = target.with_suffix(".traineddata.download")
-    request = urllib.request.Request(
+    request = urllib.request.Request(  # noqa: S310 - fixed https URL
         LANGUAGE_DATA_URL.format(code=code),
         headers={"User-Agent": "MarkitdownTool"},
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 - fixed https URL
             content_length = response.headers.get("Content-Length")
             if content_length and int(content_length) > MAX_LANGUAGE_DATA_SIZE:
                 raise ValueError("Gói ngôn ngữ vượt quá giới hạn kích thước 100 MB.")

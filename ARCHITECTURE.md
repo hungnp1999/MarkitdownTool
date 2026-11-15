@@ -48,7 +48,7 @@ flowchart LR
 ## Invariants
 
 - Every caller-supplied path (input, folder, `output_dir`) goes through `ensure_allowed_path` before any `pathlib` or file-system call; before that only string-only `os.path` functions are used.
-- The final check in `ensure_allowed_path` stays `realpath` followed by an inline `startswith` guard on the same variable (CodeQL `py/path-injection`).
+- The final check in `ensure_allowed_path` stays `realpath` followed by an inline `startswith` guard on the same variable (path-injection analysers and `/security-review`).
 - UNC, WebDAV and device paths are refused before any I/O (NTLM leak).
 - The API always requires the bearer token and refuses non-loopback Host headers.
 - Office is driven only from the app, never from CLI, API or MCP; files from the internet zone are never opened with Office.
@@ -58,4 +58,4 @@ flowchart LR
 ## Review habits
 
 - Redraw the diagram above (or a richer one as an Artifact page) before each release and after a large refactor; note any drift from this file in the PR.
-- Run `/security-review` before merging a code PR that touches `integration_service.py`, the API, MCP or CLI interfaces, `office_converter.py`, subprocess calls, network calls or `.claude/`. CodeQL runs on every PR.
+- Run `/security-review` before merging a code PR that touches `integration_service.py`, the API, MCP or CLI interfaces, `office_converter.py`, subprocess calls, network calls or `.claude/`. CodeQL runs while the repo is public; the `Security scan` (ruff `S`) and `Secret scan` workflows run on every PR and are the only scanners if the repo goes private (lfmap #346).
