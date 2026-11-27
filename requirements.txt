@@ -1,7 +1,7 @@
 markitdown[all]==0.1.9
 ocrmypdf==17.13.0
 pdfplumber==0.11.10
-pypdfium2==5.14.0
+pypdfium2==5.15.2
 pyinstaller==6.22.3
 mcp==2.3.0
 pywin32==312; sys_platform == "win32"
