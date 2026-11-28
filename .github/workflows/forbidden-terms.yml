@@ -1,0 +1,59 @@
+name: Forbidden terms
+
+# Fails when a term from the FORBIDDEN_TERMS Actions secret (one term per line, set by the
+# owner) appears in the tree, in the commit messages being added, or in the PR title or body.
+# Matching is case-insensitive, whole words, fixed strings. The log names the file and line,
+# never the term.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+concurrency:
+  group: forbidden-terms-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  forbidden-terms:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan tree, new commit messages, PR title and body
+        env:
+          TERMS: ${{ secrets.FORBIDDEN_TERMS }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          RANGE: >-
+            ${{ github.event_name == 'pull_request'
+            && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
+            || format('{0}..{1}', github.event.before, github.sha) }}
+          LC_ALL: C.UTF-8
+        run: |
+          if [ -z "$TERMS" ]; then
+            echo "::warning::The FORBIDDEN_TERMS secret is not set, so nothing was checked."
+            exit 0
+          fi
+          terms="$RUNNER_TEMP/terms"
+          printf '%s\n' "$TERMS" | sed 's/\r$//; /^[[:space:]]*$/d' > "$terms"
+          hits=0
+          if git grep -I -n -i -w -F -f "$terms" -- . | cut -d: -f1,2 | sed 's/^/::error::Forbidden term in /' | grep .; then
+            hits=1
+          fi
+          n=$( (git log --format=%B "$RANGE" 2>/dev/null || true) | grep -c -i -w -F -f "$terms" || true)
+          if [ "$n" -gt 0 ]; then
+            echo "::error::Forbidden term in $n line(s) of the new commit messages."
+            hits=1
+          fi
+          if printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" | grep -q -i -w -F -f "$terms"; then
+            echo "::error::Forbidden term in the PR title or body."
+            hits=1
+          fi
+          exit "$hits"

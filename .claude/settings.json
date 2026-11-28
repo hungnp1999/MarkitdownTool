@@ -10,5 +10,19 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --delete:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean:*)",
+      "Bash(gh repo delete:*)"
+    ],
+    "ask": [
+      "Bash(gh pr merge:*)",
+      "Bash(gh release delete:*)"
+    ]
   }
 }
