@@ -10,18 +10,7 @@ Guidance for Claude Code sessions working on MarkitdownTool. Keep this file shor
 
 ## Architecture
 
-Module map, main flows and invariants: `ARCHITECTURE.md` (update it in the same PR when they change).
-
-| Module | Role |
-| --- | --- |
-| `document_core.py` | Core pipeline: `classify_file`, `collect_supported_files`, `run_ocr` (OCRmyPDF + Tesseract), `convert_markdown` (MarkItDown), `process_batch`. `SUPPORTED_EXTENSIONS` gates every interface. |
-| `app_paths.py`, `app_runtime.py` | Version (`APP_VERSION`), config file, per-user data folders, logging, API token file. Shared by GUI and integrations. |
-| `integration_service.py` | Protocol-neutral service returning JSON-ready dicts; **all path security lives here** (`allowed_roots`, `ensure_allowed_path`). |
-| `markitdown_cli.py` | CLI (`convert`, `classify`, `languages`, `info`, `api`, `mcp`); exit codes 0/1/2. |
-| `api_server.py` | Local HTTP API (stdlib `http.server`), bearer token always required, loopback Host and JSON content-type checks. |
-| `mcp_server.py` | MCP stdio server (`mcp` 2.x, `MCPServer`, structured output). |
-| `markitdown_gui.py` | Tkinter GUI; Settings → Connection shows CLI/API/MCP snippets. |
-| `markitdown_gui.spec`, `installer/` | PyInstaller (two onefile exes: `markitdown_gui.exe`, console `markitdowntool.exe`) and NSIS installer. |
+Module map, main flows and invariants: `ARCHITECTURE.md` (update it in the same PR when they change). All path security lives in `integration_service.py` (`allowed_roots`, `ensure_allowed_path`); `SUPPORTED_EXTENSIONS` in `document_core.py` gates every interface.
 
 ## Security rules (do not regress)
 
@@ -51,7 +40,7 @@ Module map, main flows and invariants: `ARCHITECTURE.md` (update it in the same 
 
 - The venv uses **Python 3.12** (`py -3.12 -m venv .venv`). Don't use the machine's default Python 3.15: `markitdown` requires `<3.15`.
 - GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` (may not be on PATH in older sessions).
-- Release build needs Tesseract at `C:\Program Files\Tesseract-OCR` (installed via winget, has only `eng` + `osd`) and NSIS. Before `Build-Release.ps1`, copy `vie.traineddata` into `build\installer_payload\tesseract\tessdata\` (a copy exists in `%LOCALAPPDATA%\Programs\MarkitdownTool\tesseract\tessdata\`); the script requires it.
+- Release build prerequisites (Tesseract `vie` data, NSIS): the `release` skill and `docs/dev/workflow.md`.
 
 ## Tooling pitfalls
 
@@ -59,16 +48,14 @@ Module map, main flows and invariants: `ARCHITECTURE.md` (update it in the same 
 - Testing the onefile exes: a killed parent leaves the child holding pipes. Do not pipe the server's stderr in smoke tests; stop it with `taskkill /T`.
 - `collect_all('mcp')` must exclude `mcp.cli` (needs `typer`); see the spec.
 
-## Workflow
+## Workflow (full text: `docs/dev/workflow.md`)
 
 1. Branch from up-to-date `main`: `feature/*`, `fix/*`, `docs/*`.
-2. Update `CHANGELOG.md` (an `[Unreleased]` section until release) and README when behaviour changes.
-3. Run the full test suite; for interface changes also smoke-test the CLI/API/MCP.
-   Before merging a code PR that touches `integration_service.py`, the CLI/API/MCP interfaces, `office_converter.py`, subprocess or network calls, or `.claude/`, run `/security-review` and fix or answer its findings. Docs-only PRs skip it.
-4. Open a PR with `gh pr create --body-file ...`; the maintainer approves merges.
-5. CodeQL (default setup) runs while the repo is public and on a PR only reports alerts on changed lines. After merging, confirm the `main` analysis of the merge commit with the `codeql-verify` skill (`.claude/skills/codeql-verify/`). Independently of CodeQL, the `Security scan` workflow (ruff `S` rules, `ruff.toml`) and `Secret scan` (gitleaks) must pass, and `/security-review` runs for the paths in step 3. A `noqa: S...` needs a reason on the same line. If the repo goes private, CodeQL and the `codeql-verify` skill are retired (GitHub Code Security is paid, lfmap #346) and nothing blocks a merge: check the PR checks yourself before merging.
-6. Before each release and after a large refactor, redraw the architecture diagram (Artifact page) and note any drift from `ARCHITECTURE.md`.
-7. Release (step by step in the `release` skill, `.claude/skills/release/`): bump `APP_VERSION` (`app_runtime.py`), `PRODUCT_VERSION`/`VIProductVersion` (`installer/MarkitdownTool.nsi`) and the README title; build from `main`; smoke-test `dist\markitdowntool.exe`; `gh release create vX.Y.Z` with `MarkitdownTool-Setup.exe`, `markitdown_gui.exe`, `markitdowntool.exe` and their SHA-256 in the notes.
+2. Update `CHANGELOG.md` (`[Unreleased]`) and README when behaviour changes.
+3. Run the full test suite; for interface changes also smoke-test the CLI/API/MCP. Before merging a code PR that touches `integration_service.py`, the CLI/API/MCP interfaces, `office_converter.py`, subprocess or network calls, or `.claude/`, run `/security-review` and fix or answer its findings. Docs-only PRs skip it.
+4. Open a PR with `gh pr create --body-file ...`. Merge only when `Security scan`, `Secret scan`, `Provenance` and CodeQL (while public) are green on the head; after merging Python changes, confirm the `main` CodeQL analysis with the `codeql-verify` skill. A `noqa: S...` needs a reason on the same line.
+5. Before each release and after a large refactor, redraw the architecture diagram (Artifact page) and note any drift from `ARCHITECTURE.md`.
+6. Release: follow the `release` skill (`.claude/skills/release/`).
 
 ## Backlog
 
