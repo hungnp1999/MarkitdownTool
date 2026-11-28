@@ -53,7 +53,7 @@ Module map, main flows and invariants: `ARCHITECTURE.md` (update it in the same 
 1. Branch from up-to-date `main`: `feature/*`, `fix/*`, `docs/*`.
 2. Update `CHANGELOG.md` (`[Unreleased]`) and README when behaviour changes.
 3. Run the full test suite; for interface changes also smoke-test the CLI/API/MCP. Before merging a code PR that touches `integration_service.py`, the CLI/API/MCP interfaces, `office_converter.py`, subprocess or network calls, or `.claude/`, run `/security-review` and fix or answer its findings. Docs-only PRs skip it.
-4. Open a PR with `gh pr create --body-file ...`. Merge only when `Security scan`, `Secret scan`, `Provenance` and CodeQL (while public) are green on the head; after merging Python changes, confirm the `main` CodeQL analysis with the `codeql-verify` skill. A `noqa: S...` needs a reason on the same line.
+4. Open a PR with `gh pr create --body-file ...`. Never merge a PR labelled `gate:po` (ADR changes, security or licence policy, `.claude/`, releases, anything irreversible): the maintainer approves it, and you label such a PR when you open it. Otherwise merge only when `Security scan`, `Secret scan`, `Provenance` and CodeQL (while public) are green on the head; after merging Python changes, confirm the `main` CodeQL analysis with the `codeql-verify` skill. A `noqa: S...` needs a reason on the same line.
 5. Before each release and after a large refactor, redraw the architecture diagram (Artifact page) and note any drift from `ARCHITECTURE.md`.
 6. Release: follow the `release` skill (`.claude/skills/release/`).
 
